@@ -57,7 +57,297 @@ def get_sentiment(ticker_symbol):
         return "Unknown", "Could not analyze sentiment."
 
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+import numpy as np
+from datetime import timedelta
+
+def calculate_volatility_metrics(ticker_symbol: str):
+    """
+    Calculate IV Rank and related volatility metrics for CSP strategy.
+    Returns dict with current_iv, iv_rank, hv_30, hv_rank, iv_hv_ratio, and recommendation.
+    """
+    import math
+    
+    def sanitize(val):
+        if val is None:
+            return None
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return None
+        return round(val, 2) if isinstance(val, float) else val
+    
+    try:
+        stock = yf.Ticker(ticker_symbol)
+        
+        # Get 1 year of historical data for HV calculations
+        hist = stock.history(period="1y")
+        if hist.empty or len(hist) < 60:
+            return {"error": "Insufficient historical data for volatility calculation"}
+        
+        current_price = hist['Close'].iloc[-1]
+        
+        # Calculate Historical Volatility (30-day, annualized)
+        log_returns = np.log(hist['Close'] / hist['Close'].shift(1))
+        
+        # Rolling 30-day HV over the year
+        rolling_hv = log_returns.rolling(window=30).std() * np.sqrt(252) * 100
+        current_hv_30 = rolling_hv.iloc[-1]
+        
+        # HV Rank: where current HV sits in 52-week range
+        hv_min = rolling_hv.min()
+        hv_max = rolling_hv.max()
+        if hv_max > hv_min:
+            hv_rank = ((current_hv_30 - hv_min) / (hv_max - hv_min)) * 100
+        else:
+            hv_rank = 50  # Default if no range
+        
+        # Try to get IV from options chain
+        current_iv = None
+        iv_rank = None
+        iv_hv_ratio = None
+        
+        try:
+            options_dates = stock.options
+            if options_dates and len(options_dates) > 0:
+                # Find expiration closest to 30 DTE
+                today = datetime.now()
+                target_dte = 30
+                best_expiry = None
+                best_diff = float('inf')
+                
+                for exp_str in options_dates:
+                    exp_date = datetime.strptime(exp_str, "%Y-%m-%d")
+                    dte = (exp_date - today).days
+                    if 7 <= dte <= 60:  # Look for 7-60 DTE
+                        diff = abs(dte - target_dte)
+                        if diff < best_diff:
+                            best_diff = diff
+                            best_expiry = exp_str
+                
+                if best_expiry:
+                    chain = stock.option_chain(best_expiry)
+                    puts = chain.puts
+                    
+                    if not puts.empty:
+                        # Find ATM put (strike closest to current price)
+                        puts['strike_diff'] = abs(puts['strike'] - current_price)
+                        atm_put = puts.loc[puts['strike_diff'].idxmin()]
+                        
+                        # Get IV (yfinance returns as decimal, e.g., 0.35 = 35%)
+                        if 'impliedVolatility' in atm_put and atm_put['impliedVolatility'] > 0:
+                            current_iv = atm_put['impliedVolatility'] * 100
+                            
+                            # IV/HV Ratio
+                            if current_hv_30 > 0:
+                                iv_hv_ratio = current_iv / current_hv_30
+                            
+                            # For IV Rank, we use HV Rank as proxy since we don't have historical IV
+                            # A more sophisticated approach would store daily IV readings
+                            # For now, use current IV vs HV range as an approximation
+                            iv_rank = hv_rank  # Proxy: assume IV rank tracks HV rank loosely
+                            
+        except Exception as e:
+            print(f"Options data error for {ticker_symbol}: {e}")
+        
+        # Generate recommendation
+        recommendation = generate_csp_recommendation(current_iv, iv_rank, hv_rank, iv_hv_ratio)
+        
+        return {
+            "symbol": ticker_symbol,
+            "current_price": sanitize(current_price),
+            "current_iv": sanitize(current_iv),
+            "iv_rank": sanitize(iv_rank),
+            "hv_30": sanitize(current_hv_30),
+            "hv_rank": sanitize(hv_rank),
+            "hv_52w_low": sanitize(hv_min),
+            "hv_52w_high": sanitize(hv_max),
+            "iv_hv_ratio": sanitize(iv_hv_ratio),
+            "recommendation": recommendation
+        }
+        
+    except Exception as e:
+        print(f"Volatility calculation error for {ticker_symbol}: {e}")
+        return {"error": str(e)}
+
+
+def generate_csp_recommendation(current_iv, iv_rank, hv_rank, iv_hv_ratio):
+    """Generate CSP trading recommendation based on volatility metrics."""
+    
+    # Use HV rank if IV rank not available
+    rank = iv_rank if iv_rank is not None else hv_rank
+    
+    if rank is None:
+        return "Unable to calculate - insufficient data"
+    
+    # IV/HV ratio interpretation
+    ratio_text = ""
+    if iv_hv_ratio is not None:
+        if iv_hv_ratio > 1.2:
+            ratio_text = "Options are expensive relative to historical vol. "
+        elif iv_hv_ratio < 0.8:
+            ratio_text = "Options are cheap relative to historical vol. "
+    
+    # Rank-based recommendation
+    if rank >= 75:
+        return f"🟣 Excellent for CSP - Very high IV ({rank:.0f}%). {ratio_text}Premium is rich."
+    elif rank >= 50:
+        return f"🟢 Good for CSP - Above average IV ({rank:.0f}%). {ratio_text}Decent premium."
+    elif rank >= 25:
+        return f"🟡 Moderate - Below average IV ({rank:.0f}%). {ratio_text}Consider waiting."
+    else:
+        return f"🔴 Poor for CSP - Low IV ({rank:.0f}%). {ratio_text}Premium is thin."
+
+
+def calculate_csp_metrics(ticker_symbol: str):
+    """
+    Calculate CSP-specific metrics: 52-week range, ATR, support/resistance, earnings.
+    """
+    import math
+    
+    def sanitize(val):
+        if val is None:
+            return None
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return None
+        return round(val, 2) if isinstance(val, float) else val
+    
+    try:
+        stock = yf.Ticker(ticker_symbol)
+        info = stock.info
+        
+        # Get historical data for calculations
+        hist = stock.history(period="1y")
+        if hist.empty or len(hist) < 20:
+            return {"error": "Insufficient historical data"}
+        
+        current_price = hist['Close'].iloc[-1]
+        
+        # === 52-Week Range ===
+        week52_high = info.get('fiftyTwoWeekHigh', hist['High'].max())
+        week52_low = info.get('fiftyTwoWeekLow', hist['Low'].min())
+        
+        if week52_high and week52_low and week52_high > week52_low:
+            price_position = ((current_price - week52_low) / (week52_high - week52_low)) * 100
+        else:
+            price_position = 50
+        
+        # === ATR (Average True Range) ===
+        # Calculate ATR manually for reliability
+        high = hist['High']
+        low = hist['Low']
+        close = hist['Close']
+        
+        tr1 = high - low
+        tr2 = abs(high - close.shift(1))
+        tr3 = abs(low - close.shift(1))
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr_14 = tr.rolling(window=14).mean().iloc[-1]
+        atr_percent = (atr_14 / current_price) * 100 if current_price > 0 else 0
+        
+        # Suggested strikes based on ATR
+        suggested_strikes = [
+            sanitize(current_price - atr_14),       # 1 ATR below
+            sanitize(current_price - (2 * atr_14)), # 2 ATR below
+            sanitize(current_price - (3 * atr_14))  # 3 ATR below
+        ]
+        
+        # === Support/Resistance Levels ===
+        # Use pivot points + recent swing levels
+        
+        # Classic Pivot Points (using last day's data)
+        prev_high = hist['High'].iloc[-2]
+        prev_low = hist['Low'].iloc[-2]
+        prev_close = hist['Close'].iloc[-2]
+        pivot = (prev_high + prev_low + prev_close) / 3
+        
+        # Support levels
+        s1 = (2 * pivot) - prev_high
+        s2 = pivot - (prev_high - prev_low)
+        s3 = prev_low - 2 * (prev_high - pivot)
+        
+        # Resistance levels
+        r1 = (2 * pivot) - prev_low
+        r2 = pivot + (prev_high - prev_low)
+        r3 = prev_high + 2 * (pivot - prev_low)
+        
+        # Also find recent swing lows (last 20 days)
+        recent_20 = hist.tail(20)
+        swing_lows = []
+        for i in range(2, len(recent_20) - 2):
+            if (recent_20['Low'].iloc[i] < recent_20['Low'].iloc[i-1] and 
+                recent_20['Low'].iloc[i] < recent_20['Low'].iloc[i-2] and
+                recent_20['Low'].iloc[i] < recent_20['Low'].iloc[i+1] and 
+                recent_20['Low'].iloc[i] < recent_20['Low'].iloc[i+2]):
+                swing_lows.append(recent_20['Low'].iloc[i])
+        
+        # Combine and sort support levels
+        all_supports = [s1, s2, s3] + swing_lows
+        all_supports = [s for s in all_supports if s < current_price]
+        all_supports = sorted(set([sanitize(s) for s in all_supports if s]), reverse=True)[:3]
+        
+        support_levels = all_supports if all_supports else [sanitize(s1), sanitize(s2)]
+        resistance_levels = [sanitize(r1), sanitize(r2), sanitize(r3)]
+        
+        # === Earnings Calendar ===
+        next_earnings = None
+        days_to_earnings = None
+        earnings_warning = False
+        
+        try:
+            # Try to get earnings dates
+            earnings_dates = stock.earnings_dates
+            if earnings_dates is not None and not earnings_dates.empty:
+                today = datetime.now()
+                future_dates = earnings_dates[earnings_dates.index > pd.Timestamp(today)]
+                if not future_dates.empty:
+                    next_earnings_date = future_dates.index[0]
+                    next_earnings = next_earnings_date.strftime("%Y-%m-%d")
+                    days_to_earnings = (next_earnings_date - pd.Timestamp(today)).days
+                    earnings_warning = days_to_earnings <= 30
+        except Exception as e:
+            print(f"Earnings data error for {ticker_symbol}: {e}")
+            # Try alternative: calendar
+            try:
+                cal = stock.calendar
+                if cal is not None and 'Earnings Date' in cal:
+                    earnings_date = cal['Earnings Date']
+                    if earnings_date:
+                        if isinstance(earnings_date, list):
+                            earnings_date = earnings_date[0]
+                        next_earnings = str(earnings_date)[:10]
+                        days_to_earnings = (pd.Timestamp(earnings_date) - pd.Timestamp(datetime.now())).days
+                        earnings_warning = days_to_earnings <= 30 if days_to_earnings else False
+            except:
+                pass
+        
+        return {
+            "symbol": ticker_symbol,
+            "current_price": sanitize(current_price),
+            
+            # 52-Week Range
+            "week52_high": sanitize(week52_high),
+            "week52_low": sanitize(week52_low),
+            "price_position": sanitize(price_position),
+            
+            # ATR
+            "atr_14": sanitize(atr_14),
+            "atr_percent": sanitize(atr_percent),
+            "suggested_strikes": suggested_strikes,
+            
+            # Support/Resistance
+            "support_levels": support_levels,
+            "resistance_levels": resistance_levels,
+            "pivot": sanitize(pivot),
+            
+            # Earnings
+            "next_earnings": next_earnings,
+            "days_to_earnings": days_to_earnings,
+            "earnings_warning": earnings_warning
+        }
+        
+    except Exception as e:
+        print(f"CSP metrics error for {ticker_symbol}: {e}")
+        return {"error": str(e)}
+
 
 class BatchRequest(BaseModel):
     tickers: List[str]
@@ -208,6 +498,40 @@ async def get_history(ticker: str, period: str = "3y"):
         raise
     except Exception as e:
         print(f"History error for {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/volatility/{ticker}")
+async def get_volatility(ticker: str):
+    """Get volatility metrics for CSP strategy including IV Rank, HV, and recommendation."""
+    try:
+        ticker = ticker.upper().strip()
+        result = calculate_volatility_metrics(ticker)
+        
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Volatility error for {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/csp-metrics/{ticker}")
+async def get_csp_metrics(ticker: str):
+    """Get CSP-specific metrics: 52-week range, ATR, support/resistance, earnings calendar."""
+    try:
+        ticker = ticker.upper().strip()
+        result = calculate_csp_metrics(ticker)
+        
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"CSP metrics error for {ticker}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

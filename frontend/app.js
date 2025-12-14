@@ -150,6 +150,10 @@ function StockAnalysis({ data }) {
                     </div>
                 </Card>
 
+                <VolatilityCard symbol={data.symbol} />
+
+                <CSPMetricsCard symbol={data.symbol} />
+
                 <Card title="Key Indicators">
                     <RSIVisualizer value={data.indicators.RSI} />
                     <BollingerVisualizer
@@ -171,6 +175,415 @@ function StockAnalysis({ data }) {
         </div>
     );
 }
+
+function VolatilityCard({ symbol }) {
+    const [volData, setVolData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        setLoading(true);
+        setError(null);
+
+        fetch(`/api/volatility/${symbol}`)
+            .then(res => {
+                if (!res.ok) throw new Error('Failed to fetch volatility data');
+                return res.json();
+            })
+            .then(data => {
+                setVolData(data);
+                setLoading(false);
+            })
+            .catch(err => {
+                setError(err.message);
+                setLoading(false);
+            });
+    }, [symbol]);
+
+    if (loading) {
+        return (
+            <Card title="Volatility Analysis (CSP)">
+                <div style={{ height: '100px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+                    Loading volatility data...
+                </div>
+            </Card>
+        );
+    }
+
+    if (error || !volData) {
+        return (
+            <Card title="Volatility Analysis (CSP)">
+                <div style={{ height: '100px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+                    Volatility data unavailable
+                </div>
+            </Card>
+        );
+    }
+
+    return (
+        <Card title="Volatility Analysis (CSP)">
+            <IVRankGauge
+                ivRank={volData.iv_rank}
+                hvRank={volData.hv_rank}
+                currentIV={volData.current_iv}
+                hv30={volData.hv_30}
+                ivHvRatio={volData.iv_hv_ratio}
+            />
+            <div style={{
+                marginTop: '0.75rem',
+                padding: '0.75rem',
+                background: 'rgba(255,255,255,0.03)',
+                borderRadius: '8px',
+                fontSize: '0.85rem',
+                lineHeight: '1.4'
+            }}>
+                {volData.recommendation}
+            </div>
+        </Card>
+    );
+}
+
+function IVRankGauge({ ivRank, hvRank, currentIV, hv30, ivHvRatio }) {
+    // Use IV Rank if available, otherwise use HV Rank
+    const rank = ivRank !== null ? ivRank : hvRank;
+    const rankLabel = ivRank !== null ? 'IV Rank' : 'HV Rank';
+
+    if (rank === null) {
+        return <div style={{ color: 'var(--text-secondary)' }}>Insufficient data</div>;
+    }
+
+    // Color based on rank level
+    let gaugeColor = 'var(--text-secondary)';
+    let rankLevel = 'Neutral';
+
+    if (rank >= 75) {
+        gaugeColor = '#9b59b6'; // Purple - excellent
+        rankLevel = 'Very High';
+    } else if (rank >= 50) {
+        gaugeColor = 'var(--success)'; // Green - good
+        rankLevel = 'Above Avg';
+    } else if (rank >= 25) {
+        gaugeColor = '#f39c12'; // Yellow - moderate
+        rankLevel = 'Below Avg';
+    } else {
+        gaugeColor = 'var(--danger)'; // Red - poor
+        rankLevel = 'Low';
+    }
+
+    return (
+        <div>
+            {/* IV Rank Gauge */}
+            <div style={{ marginBottom: '0.75rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{rankLabel}</span>
+                    <span style={{ fontWeight: 700, color: gaugeColor }}>{rank.toFixed(0)}% ({rankLevel})</span>
+                </div>
+                <div style={{
+                    height: '10px',
+                    background: 'rgba(255,255,255,0.1)',
+                    borderRadius: '5px',
+                    position: 'relative',
+                    overflow: 'hidden'
+                }}>
+                    {/* Background zones */}
+                    <div style={{
+                        position: 'absolute',
+                        left: 0,
+                        width: '25%',
+                        height: '100%',
+                        background: 'rgba(231, 76, 60, 0.2)'
+                    }} />
+                    <div style={{
+                        position: 'absolute',
+                        left: '25%',
+                        width: '25%',
+                        height: '100%',
+                        background: 'rgba(243, 156, 18, 0.2)'
+                    }} />
+                    <div style={{
+                        position: 'absolute',
+                        left: '50%',
+                        width: '25%',
+                        height: '100%',
+                        background: 'rgba(46, 204, 113, 0.2)'
+                    }} />
+                    <div style={{
+                        position: 'absolute',
+                        left: '75%',
+                        width: '25%',
+                        height: '100%',
+                        background: 'rgba(155, 89, 182, 0.2)'
+                    }} />
+                    {/* Actual gauge fill */}
+                    <div style={{
+                        position: 'absolute',
+                        left: 0,
+                        top: 0,
+                        width: `${Math.min(rank, 100)}%`,
+                        height: '100%',
+                        background: gaugeColor,
+                        borderRadius: '5px',
+                        transition: 'width 0.5s ease'
+                    }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px', fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
+                    <span>0</span>
+                    <span>25</span>
+                    <span>50</span>
+                    <span>75</span>
+                    <span>100</span>
+                </div>
+            </div>
+
+            {/* Metrics Row */}
+            <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '0.5rem',
+                marginTop: '0.5rem'
+            }}>
+                <div style={{ textAlign: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>Current IV</div>
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{currentIV !== null ? `${currentIV}%` : 'N/A'}</div>
+                </div>
+                <div style={{ textAlign: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>HV (30d)</div>
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{hv30 !== null ? `${hv30}%` : 'N/A'}</div>
+                </div>
+                <div style={{ textAlign: 'center', padding: '0.5rem', background: 'rgba(255,255,255,0.03)', borderRadius: '6px' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>IV/HV</div>
+                    <div style={{
+                        fontWeight: 600,
+                        fontSize: '0.9rem',
+                        color: ivHvRatio > 1.2 ? 'var(--success)' : ivHvRatio < 0.8 ? 'var(--danger)' : 'inherit'
+                    }}>
+                        {ivHvRatio !== null ? ivHvRatio.toFixed(2) : 'N/A'}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function CSPMetricsCard({ symbol }) {
+    const [cspData, setCspData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        setLoading(true);
+        setError(null);
+
+        fetch(`/api/csp-metrics/${symbol}`)
+            .then(res => {
+                if (!res.ok) throw new Error('Failed to fetch CSP metrics');
+                return res.json();
+            })
+            .then(data => {
+                setCspData(data);
+                setLoading(false);
+            })
+            .catch(err => {
+                setError(err.message);
+                setLoading(false);
+            });
+    }, [symbol]);
+
+    if (loading) {
+        return (
+            <Card title="Strike Selection Guide">
+                <div style={{ height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+                    Loading CSP metrics...
+                </div>
+            </Card>
+        );
+    }
+
+    if (error || !cspData) {
+        return (
+            <Card title="Strike Selection Guide">
+                <div style={{ height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+                    CSP metrics unavailable
+                </div>
+            </Card>
+        );
+    }
+
+    return (
+        <>
+            {/* Earnings Warning - Show separately if warning */}
+            {cspData.earnings_warning && (
+                <div style={{
+                    background: 'linear-gradient(135deg, rgba(231, 76, 60, 0.2), rgba(192, 57, 43, 0.2))',
+                    border: '1px solid rgba(231, 76, 60, 0.5)',
+                    borderRadius: '12px',
+                    padding: '1rem',
+                    marginBottom: '1rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.75rem'
+                }}>
+                    <span style={{ fontSize: '1.5rem' }}>⚠️</span>
+                    <div>
+                        <div style={{ fontWeight: 700, color: 'var(--danger)' }}>
+                            Earnings in {cspData.days_to_earnings} days
+                        </div>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                            {cspData.next_earnings} - Consider waiting or shorter DTE
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <Card title="Strike Selection Guide">
+                {/* 52-Week Range */}
+                <Week52RangeGauge
+                    currentPrice={cspData.current_price}
+                    high={cspData.week52_high}
+                    low={cspData.week52_low}
+                    position={cspData.price_position}
+                />
+
+                {/* ATR-based Strikes */}
+                <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                        ATR-Based Strikes <span style={{ opacity: 0.6 }}>(ATR: ${cspData.atr_14} | {cspData.atr_percent}%)</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        {cspData.suggested_strikes && cspData.suggested_strikes.map((strike, idx) => (
+                            <div key={idx} style={{
+                                background: idx === 0 ? 'rgba(46, 204, 113, 0.15)' : 'rgba(255,255,255,0.05)',
+                                border: idx === 0 ? '1px solid rgba(46, 204, 113, 0.3)' : '1px solid rgba(255,255,255,0.1)',
+                                borderRadius: '8px',
+                                padding: '0.5rem 0.75rem',
+                                textAlign: 'center',
+                                flex: '1',
+                                minWidth: '80px'
+                            }}>
+                                <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>
+                                    {idx + 1} ATR
+                                </div>
+                                <div style={{ fontWeight: 600, color: idx === 0 ? 'var(--success)' : 'inherit' }}>
+                                    ${strike}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Support Levels */}
+                <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                        Support Levels
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        {cspData.support_levels && cspData.support_levels.map((level, idx) => (
+                            <div key={idx} style={{
+                                background: 'rgba(52, 152, 219, 0.1)',
+                                border: '1px solid rgba(52, 152, 219, 0.3)',
+                                borderRadius: '6px',
+                                padding: '0.35rem 0.6rem',
+                                fontSize: '0.85rem',
+                                fontWeight: 500
+                            }}>
+                                ${level}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Earnings Info (non-warning) */}
+                {!cspData.earnings_warning && cspData.next_earnings && (
+                    <div style={{
+                        marginTop: '0.75rem',
+                        paddingTop: '0.75rem',
+                        borderTop: '1px solid rgba(255,255,255,0.05)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        fontSize: '0.85rem'
+                    }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>Next Earnings</span>
+                        <span>
+                            {cspData.next_earnings}
+                            <span style={{ color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>
+                                ({cspData.days_to_earnings} days)
+                            </span>
+                        </span>
+                    </div>
+                )}
+            </Card>
+        </>
+    );
+}
+
+function Week52RangeGauge({ currentPrice, high, low, position }) {
+    if (!high || !low) return null;
+
+    const clampedPosition = Math.min(Math.max(position || 50, 0), 100);
+
+    // Color based on position
+    let positionColor = 'var(--text-secondary)';
+    let positionLabel = 'Mid-Range';
+
+    if (clampedPosition >= 80) {
+        positionColor = 'var(--success)';
+        positionLabel = 'Near High';
+    } else if (clampedPosition >= 60) {
+        positionColor = '#3498db';
+        positionLabel = 'Upper Range';
+    } else if (clampedPosition <= 20) {
+        positionColor = 'var(--danger)';
+        positionLabel = 'Near Low';
+    } else if (clampedPosition <= 40) {
+        positionColor = '#f39c12';
+        positionLabel = 'Lower Range';
+    }
+
+    return (
+        <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>52-Week Range</span>
+                <span style={{ fontWeight: 600, color: positionColor }}>{clampedPosition.toFixed(0)}% ({positionLabel})</span>
+            </div>
+            <div style={{
+                height: '10px',
+                background: 'rgba(255,255,255,0.1)',
+                borderRadius: '5px',
+                position: 'relative',
+                overflow: 'hidden'
+            }}>
+                {/* Gradient background */}
+                <div style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    width: '100%',
+                    height: '100%',
+                    background: 'linear-gradient(90deg, rgba(231, 76, 60, 0.3), rgba(243, 156, 18, 0.3), rgba(52, 152, 219, 0.3), rgba(46, 204, 113, 0.3))',
+                    borderRadius: '5px'
+                }} />
+                {/* Price indicator */}
+                <div style={{
+                    position: 'absolute',
+                    left: `${clampedPosition}%`,
+                    top: '-2px',
+                    transform: 'translateX(-50%)',
+                    width: '4px',
+                    height: '14px',
+                    background: '#fff',
+                    borderRadius: '2px',
+                    boxShadow: '0 0 4px rgba(0,0,0,0.5)'
+                }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '0.75rem' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>${low}</span>
+                <span style={{ fontWeight: 600 }}>${currentPrice}</span>
+                <span style={{ color: 'var(--text-secondary)' }}>${high}</span>
+            </div>
+        </div>
+    );
+}
+
 
 // Recharts components from global
 const { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } = Recharts;
@@ -259,7 +672,11 @@ function PriceChart({ symbol }) {
                     <XAxis
                         dataKey="date"
                         tick={{ fontSize: 10, fill: 'var(--text-secondary)' }}
-                        tickFormatter={(val) => val.slice(5)}
+                        tickFormatter={(val) => {
+                            // val is "YYYY-MM-DD", extract MM and YY
+                            const parts = val.split('-');
+                            return `${parts[1]}-${parts[0].slice(2)}`;
+                        }}
                         interval="preserveStartEnd"
                     />
                     <YAxis
