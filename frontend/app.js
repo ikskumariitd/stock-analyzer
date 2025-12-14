@@ -492,6 +492,27 @@ function CSPMetricsCard({ symbol }) {
                     </div>
                 </div>
 
+                {/* Resistance Levels */}
+                <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                        Resistance Levels
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        {cspData.resistance_levels && cspData.resistance_levels.map((level, idx) => (
+                            <div key={idx} style={{
+                                background: 'rgba(231, 76, 60, 0.1)',
+                                border: '1px solid rgba(231, 76, 60, 0.3)',
+                                borderRadius: '6px',
+                                padding: '0.35rem 0.6rem',
+                                fontSize: '0.85rem',
+                                fontWeight: 500
+                            }}>
+                                ${level}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
                 {/* Earnings Info (non-warning) */}
                 {!cspData.earnings_warning && cspData.next_earnings && (
                     <div style={{
