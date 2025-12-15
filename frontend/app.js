@@ -67,10 +67,11 @@ function CacheControl() {
         alignItems: 'center',
         gap: '8px',
         padding: '6px 12px',
-        background: 'rgba(255, 255, 255, 0.1)',
+        background: 'rgba(102, 126, 234, 0.1)',
         borderRadius: '8px',
         fontSize: '0.8rem',
-        color: 'rgba(255, 255, 255, 0.8)'
+        color: '#667eea',
+        fontWeight: 500
     };
 
     const containerStyle = {
@@ -87,7 +88,7 @@ function CacheControl() {
                     <span style={{ fontSize: '1rem' }}>📦</span>
                     <span>{stats.valid_entries} cached</span>
                     {stats.oldest_age_minutes > 0 && (
-                        <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' }}>
+                        <span style={{ color: '#999', fontSize: '0.75rem' }}>
                             ({stats.oldest_age_minutes}m ago)
                         </span>
                     )}
@@ -735,7 +736,16 @@ function Dashboard({ data }) {
 function CSPSummaryTable({ stocks }) {
     const [cspData, setCspData] = useState({});
     const [loading, setLoading] = useState(true);
-    const [emailStatus, setEmailStatus] = useState(null); // null, 'sending', 'sent', 'error'
+    const [emailStatus, setEmailStatus] = useState(null);
+
+    // Sorting state
+    const [sortColumn, setSortColumn] = useState('rank');
+    const [sortDirection, setSortDirection] = useState('desc');
+
+    // Filtering state
+    const [filterRating, setFilterRating] = useState('all');
+    const [filterRSI, setFilterRSI] = useState('all');
+    const [searchTerm, setSearchTerm] = useState('');
 
     useEffect(() => {
         const fetchAllCSPData = async () => {
@@ -786,28 +796,102 @@ function CSPSummaryTable({ stocks }) {
 
     // Determine CSP suitability rating
     const getCSPRating = (volData) => {
-        if (!volData) return { text: 'N/A', color: 'var(--text-secondary)', icon: '⚪' };
+        if (!volData) return { text: 'N/A', color: 'var(--text-secondary)', icon: '⚪', rank: null, sortOrder: 0 };
 
         const rank = volData.iv_rank !== null ? volData.iv_rank : volData.hv_rank;
-        if (rank === null) return { text: 'N/A', color: 'var(--text-secondary)', icon: '⚪' };
+        if (rank === null) return { text: 'N/A', color: 'var(--text-secondary)', icon: '⚪', rank: null, sortOrder: 0 };
 
         if (rank >= 75) {
-            return { text: 'Excellent', color: '#9b59b6', icon: '🟣', rank };
+            return { text: 'Excellent', color: '#9b59b6', icon: '🟣', rank, sortOrder: 4 };
         } else if (rank >= 50) {
-            return { text: 'Good', color: 'var(--success)', icon: '🟢', rank };
+            return { text: 'Good', color: 'var(--success)', icon: '🟢', rank, sortOrder: 3 };
         } else if (rank >= 25) {
-            return { text: 'Moderate', color: '#f39c12', icon: '🟡', rank };
+            return { text: 'Moderate', color: '#f39c12', icon: '🟡', rank, sortOrder: 2 };
         } else {
-            return { text: 'Poor', color: 'var(--danger)', icon: '🔴', rank };
+            return { text: 'Poor', color: 'var(--danger)', icon: '🔴', rank, sortOrder: 1 };
         }
     };
 
-    // Sort stocks by CSP suitability (best first)
-    const sortedStocks = [...stocks].filter(s => !s.error && s.symbol).sort((a, b) => {
-        const rankA = getCSPRating(cspData[a.symbol]).rank || 0;
-        const rankB = getCSPRating(cspData[b.symbol]).rank || 0;
-        return rankB - rankA;
-    });
+    // Handle column sort
+    const handleSort = (column) => {
+        if (sortColumn === column) {
+            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortColumn(column);
+            setSortDirection(column === 'symbol' ? 'asc' : 'desc');
+        }
+    };
+
+    // Get sort value for a stock
+    const getSortValue = (stock, column) => {
+        const volData = cspData[stock.symbol];
+        const rating = getCSPRating(volData);
+
+        switch (column) {
+            case 'symbol': return stock.symbol || '';
+            case 'price': return stock.price || 0;
+            case 'change': return stock.change_1d_pct || 0;
+            case 'rsi': return stock.indicators?.RSI || 0;
+            case 'low52': return volData?.week52_low || 0;
+            case 'high52': return volData?.week52_high || 0;
+            case 'rank': return rating.rank || 0;
+            case 'rating': return rating.sortOrder || 0;
+            default: return 0;
+        }
+    };
+
+    // Filter and sort stocks
+    const filteredAndSortedStocks = [...stocks]
+        .filter(s => !s.error && s.symbol)
+        .filter(stock => {
+            // Search filter
+            if (searchTerm && !stock.symbol.toLowerCase().includes(searchTerm.toLowerCase())) {
+                return false;
+            }
+
+            // Rating filter
+            if (filterRating !== 'all') {
+                const rating = getCSPRating(cspData[stock.symbol]);
+                if (rating.text.toLowerCase() !== filterRating) return false;
+            }
+
+            // RSI filter
+            if (filterRSI !== 'all') {
+                const rsi = stock.indicators?.RSI;
+                if (rsi === null || rsi === undefined) return false;
+                switch (filterRSI) {
+                    case 'oversold': if (rsi >= 30) return false; break;
+                    case 'neutral': if (rsi < 30 || rsi > 70) return false; break;
+                    case 'overbought': if (rsi <= 70) return false; break;
+                }
+            }
+
+            return true;
+        })
+        .sort((a, b) => {
+            const valA = getSortValue(a, sortColumn);
+            const valB = getSortValue(b, sortColumn);
+
+            if (sortColumn === 'symbol') {
+                return sortDirection === 'asc'
+                    ? valA.localeCompare(valB)
+                    : valB.localeCompare(valA);
+            }
+
+            return sortDirection === 'asc' ? valA - valB : valB - valA;
+        });
+
+    // Reset filters
+    const resetFilters = () => {
+        setFilterRating('all');
+        setFilterRSI('all');
+        setSearchTerm('');
+        setSortColumn('rank');
+        setSortDirection('desc');
+    };
+
+    // Check if any filters are active
+    const hasActiveFilters = filterRating !== 'all' || filterRSI !== 'all' || searchTerm !== '';
 
     // Send email handler
     const handleSendEmail = async () => {
@@ -899,6 +983,105 @@ function CSPSummaryTable({ stocks }) {
                 </button>
             </div>
 
+            {/* Filter Bar */}
+            {!loading && (
+                <div style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '0.75rem',
+                    marginBottom: '1rem',
+                    padding: '0.75rem',
+                    background: 'rgba(0, 0, 0, 0.02)',
+                    borderRadius: '8px',
+                    alignItems: 'center'
+                }}>
+                    {/* Search */}
+                    <div style={{ flex: '1', minWidth: '150px' }}>
+                        <input
+                            type="text"
+                            placeholder="🔍 Search symbol..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            style={{
+                                width: '100%',
+                                padding: '0.5rem 0.75rem',
+                                border: '1px solid rgba(0, 0, 0, 0.1)',
+                                borderRadius: '6px',
+                                fontSize: '0.85rem',
+                                outline: 'none'
+                            }}
+                        />
+                    </div>
+
+                    {/* Rating Filter */}
+                    <select
+                        value={filterRating}
+                        onChange={(e) => setFilterRating(e.target.value)}
+                        style={{
+                            padding: '0.5rem 0.75rem',
+                            border: '1px solid rgba(0, 0, 0, 0.1)',
+                            borderRadius: '6px',
+                            fontSize: '0.85rem',
+                            background: 'white',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        <option value="all">All Ratings</option>
+                        <option value="excellent">🟣 Excellent</option>
+                        <option value="good">🟢 Good</option>
+                        <option value="moderate">🟡 Moderate</option>
+                        <option value="poor">🔴 Poor</option>
+                    </select>
+
+                    {/* RSI Filter */}
+                    <select
+                        value={filterRSI}
+                        onChange={(e) => setFilterRSI(e.target.value)}
+                        style={{
+                            padding: '0.5rem 0.75rem',
+                            border: '1px solid rgba(0, 0, 0, 0.1)',
+                            borderRadius: '6px',
+                            fontSize: '0.85rem',
+                            background: 'white',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        <option value="all">All RSI</option>
+                        <option value="oversold">📉 Oversold (&lt;30)</option>
+                        <option value="neutral">➖ Neutral (30-70)</option>
+                        <option value="overbought">📈 Overbought (&gt;70)</option>
+                    </select>
+
+                    {/* Reset Button */}
+                    {hasActiveFilters && (
+                        <button
+                            onClick={resetFilters}
+                            style={{
+                                padding: '0.5rem 0.75rem',
+                                border: '1px solid rgba(0, 0, 0, 0.1)',
+                                borderRadius: '6px',
+                                fontSize: '0.85rem',
+                                background: 'white',
+                                cursor: 'pointer',
+                                color: '#e74c3c',
+                                fontWeight: 500
+                            }}
+                        >
+                            ✕ Reset
+                        </button>
+                    )}
+
+                    {/* Results Count */}
+                    <span style={{
+                        fontSize: '0.8rem',
+                        color: 'var(--text-secondary)',
+                        marginLeft: 'auto'
+                    }}>
+                        Showing {filteredAndSortedStocks.length} of {stocks.filter(s => !s.error && s.symbol).length}
+                    </span>
+                </div>
+            )}
+
             {loading ? (
                 <div style={{
                     textAlign: 'center',
@@ -918,98 +1101,60 @@ function CSPSummaryTable({ stocks }) {
                             <tr style={{
                                 borderBottom: '2px solid rgba(0, 0, 0, 0.1)'
                             }}>
-                                <th style={{
-                                    textAlign: 'left',
-                                    padding: '0.75rem 1rem',
-                                    color: '#555',
-                                    fontWeight: 600,
-                                    fontSize: '0.8rem',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.5px'
-                                }}>
-                                    Symbol
-                                </th>
-                                <th style={{
-                                    textAlign: 'left',
-                                    padding: '0.75rem 1rem',
-                                    color: '#555',
-                                    fontWeight: 600,
-                                    fontSize: '0.8rem',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.5px'
-                                }}>
-                                    Price
-                                </th>
-                                <th style={{
-                                    textAlign: 'left',
-                                    padding: '0.75rem 1rem',
-                                    color: '#555',
-                                    fontWeight: 600,
-                                    fontSize: '0.8rem',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.5px'
-                                }}>
-                                    1D Change
-                                </th>
-                                <th style={{
-                                    textAlign: 'left',
-                                    padding: '0.75rem 1rem',
-                                    color: '#555',
-                                    fontWeight: 600,
-                                    fontSize: '0.8rem',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.5px'
-                                }}>
-                                    RSI
-                                </th>
-                                <th style={{
-                                    textAlign: 'left',
-                                    padding: '0.75rem 1rem',
-                                    color: '#555',
-                                    fontWeight: 600,
-                                    fontSize: '0.8rem',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.5px'
-                                }}>
-                                    52W Low
-                                </th>
-                                <th style={{
-                                    textAlign: 'left',
-                                    padding: '0.75rem 1rem',
-                                    color: '#555',
-                                    fontWeight: 600,
-                                    fontSize: '0.8rem',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.5px'
-                                }}>
-                                    52W High
-                                </th>
-                                <th style={{
-                                    textAlign: 'left',
-                                    padding: '0.75rem 1rem',
-                                    color: '#555',
-                                    fontWeight: 600,
-                                    fontSize: '0.8rem',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.5px'
-                                }}>
-                                    IV/HV Rank
-                                </th>
-                                <th style={{
-                                    textAlign: 'left',
-                                    padding: '0.75rem 1rem',
-                                    color: '#555',
-                                    fontWeight: 600,
-                                    fontSize: '0.8rem',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.5px'
-                                }}>
-                                    CSP Rating
-                                </th>
+                                {[
+                                    { key: 'symbol', label: 'Symbol' },
+                                    { key: 'price', label: 'Price' },
+                                    { key: 'change', label: '1D Change' },
+                                    { key: 'rsi', label: 'RSI' },
+                                    { key: 'low52', label: '52W Low' },
+                                    { key: 'high52', label: '52W High' },
+                                    { key: 'rank', label: 'IV/HV Rank' },
+                                    { key: 'rating', label: 'CSP Rating' }
+                                ].map(({ key, label }) => (
+                                    <th
+                                        key={key}
+                                        onClick={() => handleSort(key)}
+                                        style={{
+                                            textAlign: 'left',
+                                            padding: '0.75rem 1rem',
+                                            color: sortColumn === key ? '#667eea' : '#555',
+                                            fontWeight: 600,
+                                            fontSize: '0.8rem',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.5px',
+                                            cursor: 'pointer',
+                                            userSelect: 'none',
+                                            transition: 'color 0.2s ease',
+                                            whiteSpace: 'nowrap'
+                                        }}
+                                    >
+                                        {label}
+                                        <span style={{
+                                            marginLeft: '4px',
+                                            opacity: sortColumn === key ? 1 : 0.3,
+                                            fontSize: '0.7rem'
+                                        }}>
+                                            {sortColumn === key
+                                                ? (sortDirection === 'asc' ? '▲' : '▼')
+                                                : '⇅'
+                                            }
+                                        </span>
+                                    </th>
+                                ))}
                             </tr>
                         </thead>
                         <tbody>
-                            {sortedStocks.map((stock, idx) => {
+                            {filteredAndSortedStocks.length === 0 ? (
+                                <tr>
+                                    <td colSpan="8" style={{
+                                        textAlign: 'center',
+                                        padding: '2rem',
+                                        color: 'var(--text-secondary)'
+                                    }}>
+                                        No stocks match your filters. Try adjusting your criteria.
+                                    </td>
+                                </tr>
+                            ) : filteredAndSortedStocks.map((stock, idx) => {
                                 const volData = cspData[stock.symbol];
                                 const rating = getCSPRating(volData);
                                 const rank = volData?.iv_rank ?? volData?.hv_rank;
@@ -1156,10 +1301,11 @@ function CSPSummaryTable({ stocks }) {
                                 );
                             })}
                         </tbody>
-                    </table>
-                </div>
-            )}
-        </div>
+                    </table >
+                </div >
+            )
+            }
+        </div >
     );
 }
 
