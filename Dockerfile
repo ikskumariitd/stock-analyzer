@@ -1,5 +1,5 @@
-# Use Python 3.11 slim image for smaller size
-FROM python:3.11-slim
+# Use Python 3.12 slim image (required for newer pandas_ta versions)
+FROM python:3.12-slim
 
 # Set working directory
 WORKDIR /app
@@ -17,7 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY backend/requirements.txt .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Download TextBlob corpora (needed for sentiment analysis)
 RUN python -m textblob.download_corpora
