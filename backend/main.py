@@ -462,7 +462,7 @@ async def analyze_batch(request: BatchRequest):
     return results
 
 @app.get("/api/history/{ticker}")
-async def get_history(ticker: str, period: str = "3y"):
+async def get_history(ticker: str, period: str = "3y", include_bb: bool = True):
     """Get price history for charting. Period can be: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 3y, 5y, 10y, max"""
     import math
     
@@ -479,16 +479,34 @@ async def get_history(ticker: str, period: str = "3y"):
         if hist.empty:
             raise HTTPException(status_code=404, detail=f"No history found for {ticker}")
         
+        # Calculate Bollinger Bands if requested
+        if include_bb and len(hist) >= 20:
+            # 20-period SMA
+            hist['BB_Middle'] = hist['Close'].rolling(window=20).mean()
+            # 20-period standard deviation
+            rolling_std = hist['Close'].rolling(window=20).std()
+            # Upper and lower bands (2 standard deviations)
+            hist['BB_Upper'] = hist['BB_Middle'] + (rolling_std * 2)
+            hist['BB_Lower'] = hist['BB_Middle'] - (rolling_std * 2)
+        
         history_data = []
         for date, row in hist.iterrows():
-            history_data.append({
+            data_point = {
                 "date": date.strftime("%Y-%m-%d"),
                 "open": sanitize(row["Open"]),
                 "high": sanitize(row["High"]),
                 "low": sanitize(row["Low"]),
                 "close": sanitize(row["Close"]),
                 "volume": int(row["Volume"]) if not math.isnan(row["Volume"]) else 0
-            })
+            }
+            
+            # Add BB data if available
+            if include_bb and 'BB_Upper' in hist.columns:
+                data_point["bb_upper"] = sanitize(row.get("BB_Upper"))
+                data_point["bb_middle"] = sanitize(row.get("BB_Middle"))
+                data_point["bb_lower"] = sanitize(row.get("BB_Lower"))
+            
+            history_data.append(data_point)
         
         return {
             "symbol": ticker,

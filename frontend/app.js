@@ -1144,8 +1144,12 @@ function PriceChart({ symbol }) {
     const chartContainerRef = React.useRef(null);
     const chartRef = React.useRef(null);
     const seriesRef = React.useRef(null);
+    const bbUpperRef = React.useRef(null);
+    const bbMiddleRef = React.useRef(null);
+    const bbLowerRef = React.useRef(null);
     const [period, setPeriod] = useState('3y');
     const [chartType, setChartType] = useState('area'); // 'area' or 'candlestick'
+    const [showBB, setShowBB] = useState(false); // Show Bollinger Bands
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
@@ -1226,6 +1230,19 @@ function PriceChart({ symbol }) {
                 if (seriesRef.current) {
                     chartRef.current.removeSeries(seriesRef.current);
                 }
+                // Remove old BB series
+                if (bbUpperRef.current) {
+                    chartRef.current.removeSeries(bbUpperRef.current);
+                    bbUpperRef.current = null;
+                }
+                if (bbMiddleRef.current) {
+                    chartRef.current.removeSeries(bbMiddleRef.current);
+                    bbMiddleRef.current = null;
+                }
+                if (bbLowerRef.current) {
+                    chartRef.current.removeSeries(bbLowerRef.current);
+                    bbLowerRef.current = null;
+                }
 
                 // Calculate if up or down
                 const firstPrice = data.history[0]?.close || 0;
@@ -1270,6 +1287,50 @@ function PriceChart({ symbol }) {
                     seriesRef.current = areaSeries;
                 }
 
+                // Add Bollinger Bands if enabled
+                if (showBB) {
+                    const bbDataWithValues = data.history.filter(item =>
+                        item.bb_upper !== null && item.bb_middle !== null && item.bb_lower !== null
+                    );
+
+                    if (bbDataWithValues.length > 0) {
+                        // Upper band (red/orange)
+                        const upperSeries = chartRef.current.addLineSeries({
+                            color: 'rgba(239, 83, 80, 0.6)',
+                            lineWidth: 1,
+                            lineStyle: 2, // dashed
+                        });
+                        upperSeries.setData(bbDataWithValues.map(item => ({
+                            time: item.date,
+                            value: item.bb_upper,
+                        })));
+                        bbUpperRef.current = upperSeries;
+
+                        // Middle band (SMA - yellow)
+                        const middleSeries = chartRef.current.addLineSeries({
+                            color: 'rgba(255, 193, 7, 0.8)',
+                            lineWidth: 1,
+                        });
+                        middleSeries.setData(bbDataWithValues.map(item => ({
+                            time: item.date,
+                            value: item.bb_middle,
+                        })));
+                        bbMiddleRef.current = middleSeries;
+
+                        // Lower band (green)
+                        const lowerSeries = chartRef.current.addLineSeries({
+                            color: 'rgba(38, 166, 154, 0.6)',
+                            lineWidth: 1,
+                            lineStyle: 2, // dashed
+                        });
+                        lowerSeries.setData(bbDataWithValues.map(item => ({
+                            time: item.date,
+                            value: item.bb_lower,
+                        })));
+                        bbLowerRef.current = lowerSeries;
+                    }
+                }
+
                 chartRef.current.timeScale().fitContent();
                 setLoading(false);
             })
@@ -1277,7 +1338,7 @@ function PriceChart({ symbol }) {
                 setError(err.message);
                 setLoading(false);
             });
-    }, [symbol, period, chartType]);
+    }, [symbol, period, chartType, showBB]);
 
     return (
         <div>
@@ -1350,6 +1411,23 @@ function PriceChart({ symbol }) {
                         }}
                     >
                         🕯️ Candles
+                    </button>
+                    <button
+                        onClick={() => setShowBB(!showBB)}
+                        style={{
+                            padding: '0.3rem 0.6rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            background: showBB
+                                ? 'rgba(255, 193, 7, 0.2)'
+                                : 'rgba(255, 255, 255, 0.05)',
+                            color: showBB ? '#ffc107' : 'var(--text-secondary)',
+                        }}
+                    >
+                        📊 BB
                     </button>
                 </div>
             </div>
