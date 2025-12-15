@@ -25,6 +25,89 @@ if GEMINI_API_KEY:
 else:
     print("Warning: GEMINI_API_KEY not found in environment variables.")
 
+# ============================================
+# Cache Infrastructure
+# ============================================
+from threading import Lock
+import time as time_module
+
+class TTLCache:
+    """Thread-safe in-memory cache with TTL (Time To Live) support."""
+    
+    def __init__(self, default_ttl: int = 3600):  # 1 hour default
+        self._cache = {}
+        self._lock = Lock()
+        self.default_ttl = default_ttl
+        self._created_at = time_module.time()
+    
+    def get(self, key: str):
+        """Get value if exists and not expired."""
+        with self._lock:
+            if key in self._cache:
+                value, expiry, created = self._cache[key]
+                if time_module.time() < expiry:
+                    return value
+                else:
+                    # Clean up expired entry
+                    del self._cache[key]
+        return None
+    
+    def set(self, key: str, value: any, ttl: int = None):
+        """Set value with TTL."""
+        with self._lock:
+            now = time_module.time()
+            expiry = now + (ttl or self.default_ttl)
+            self._cache[key] = (value, expiry, now)
+    
+    def delete(self, key: str):
+        """Delete a specific key."""
+        with self._lock:
+            if key in self._cache:
+                del self._cache[key]
+                return True
+        return False
+    
+    def clear(self):
+        """Clear entire cache."""
+        with self._lock:
+            count = len(self._cache)
+            self._cache.clear()
+            return count
+    
+    def stats(self):
+        """Get cache statistics."""
+        with self._lock:
+            now = time_module.time()
+            total = len(self._cache)
+            valid = 0
+            oldest_age = 0
+            
+            for key, (_, expiry, created) in self._cache.items():
+                if now < expiry:
+                    valid += 1
+                    age = now - created
+                    if age > oldest_age:
+                        oldest_age = age
+            
+            expired = total - valid
+            return {
+                "total": total,
+                "valid": valid,
+                "expired": expired,
+                "oldest_age_minutes": round(oldest_age / 60, 1),
+                "ttl_hours": self.default_ttl / 3600
+            }
+    
+    def keys(self):
+        """Get all valid cache keys."""
+        with self._lock:
+            now = time_module.time()
+            return [k for k, (_, exp, _) in self._cache.items() if now < exp]
+
+# Initialize global cache with 1 hour TTL
+cache = TTLCache(default_ttl=3600)
+print(f"Cache initialized with TTL: {cache.default_ttl} seconds (1 hour)")
+
 app = FastAPI()
 
 # Configure CORS for frontend communication (still useful if using external dev server, but less critical now)
@@ -45,6 +128,37 @@ app.mount("/static", StaticFiles(directory=frontend_path), name="static")
 @app.get("/")
 async def read_root():
     return FileResponse(os.path.join(frontend_path, "index.html"))
+
+# ============================================
+# Cache Management Endpoints
+# ============================================
+
+@app.get("/api/cache/stats")
+async def get_cache_stats():
+    """Get current cache statistics."""
+    stats = cache.stats()
+    return {
+        "success": True,
+        "total_entries": stats["total"],
+        "valid_entries": stats["valid"],
+        "expired_entries": stats["expired"],
+        "oldest_age_minutes": stats["oldest_age_minutes"],
+        "ttl_seconds": cache.default_ttl,
+        "ttl_hours": stats["ttl_hours"],
+        "cached_keys": cache.keys()
+    }
+
+@app.post("/api/cache/clear")
+async def clear_cache():
+    """Clear all cached data."""
+    stats_before = cache.stats()
+    cleared_count = cache.clear()
+    return {
+        "success": True,
+        "message": "Cache cleared successfully",
+        "cleared_entries": cleared_count,
+        "timestamp": datetime.now().isoformat()
+    }
 
 def get_sentiment(ticker_symbol):
     # Retrieve news (yfinance might be limited, but we try)
@@ -464,10 +578,35 @@ def _analyze_ticker(ticker: str):
     
     return data
 
+def _analyze_ticker_cached(ticker: str):
+    """Analyze ticker with caching support."""
+    ticker = ticker.upper().strip()
+    cache_key = f"stock:{ticker}"
+    
+    # Check cache first
+    cached = cache.get(cache_key)
+    if cached is not None:
+        # Return cached data with cache indicator
+        cached["_cached"] = True
+        cached["_cache_age_minutes"] = round(
+            (time_module.time() - cache._cache.get(cache_key, (None, None, time_module.time()))[2]) / 60, 1
+        )
+        return cached
+    
+    # Fetch fresh data
+    result = _analyze_ticker(ticker)
+    result["_cached"] = False
+    result["_cache_age_minutes"] = 0
+    
+    # Store in cache
+    cache.set(cache_key, result.copy())
+    
+    return result
+
 @app.get("/api/analyze/{ticker}")
 async def analyze_stock(ticker: str):
     try:
-        return _analyze_ticker(ticker)
+        return _analyze_ticker_cached(ticker)
     except ValueError as ve:
         raise HTTPException(status_code=404, detail=str(ve))
     except Exception as e:
@@ -479,11 +618,12 @@ async def analyze_batch(request: BatchRequest):
     """
     Analyze multiple tickers in parallel for improved performance.
     Uses ThreadPoolExecutor to process tickers concurrently.
+    Uses caching to speed up repeated requests.
     """
     def analyze_single_ticker(ticker: str):
-        """Wrapper function for parallel execution."""
+        """Wrapper function for parallel execution with caching."""
         try:
-            return _analyze_ticker(ticker)
+            return _analyze_ticker_cached(ticker)
         except Exception as e:
             # For batch, we return the error in the object so frontend can show per-card error
             return {
@@ -566,10 +706,23 @@ async def get_volatility(ticker: str):
     """Get volatility metrics for CSP strategy including IV Rank, HV, and recommendation."""
     try:
         ticker = ticker.upper().strip()
+        cache_key = f"volatility:{ticker}"
+        
+        # Check cache first
+        cached = cache.get(cache_key)
+        if cached is not None:
+            cached["_cached"] = True
+            return cached
+        
+        # Fetch fresh data
         result = calculate_volatility_metrics(ticker)
         
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
+        
+        # Cache successful results
+        result["_cached"] = False
+        cache.set(cache_key, result.copy())
         
         return result
     except HTTPException:
@@ -583,10 +736,23 @@ async def get_csp_metrics(ticker: str):
     """Get CSP-specific metrics: 52-week range, ATR, support/resistance, earnings calendar."""
     try:
         ticker = ticker.upper().strip()
+        cache_key = f"csp:{ticker}"
+        
+        # Check cache first
+        cached = cache.get(cache_key)
+        if cached is not None:
+            cached["_cached"] = True
+            return cached
+        
+        # Fetch fresh data
         result = calculate_csp_metrics(ticker)
         
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
+        
+        # Cache successful results
+        result["_cached"] = False
+        cache.set(cache_key, result.copy())
         
         return result
     except HTTPException:

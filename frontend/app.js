@@ -1,5 +1,120 @@
 const { useState, useEffect } = React;
 
+// ============================================
+// Cache Control Component
+// ============================================
+function CacheControl() {
+    const [clearing, setClearing] = useState(false);
+    const [stats, setStats] = useState(null);
+    const [showDetails, setShowDetails] = useState(false);
+
+    const fetchStats = async () => {
+        try {
+            const res = await fetch('/api/cache/stats');
+            if (res.ok) {
+                const data = await res.json();
+                setStats(data);
+            }
+        } catch (e) {
+            console.error('Failed to fetch cache stats:', e);
+        }
+    };
+
+    const clearCache = async () => {
+        setClearing(true);
+        try {
+            const res = await fetch('/api/cache/clear', { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                // Show success message
+                alert(`✅ Cache cleared!\n\n${data.cleared_entries} entries removed.\nFresh data will be fetched on next load.`);
+                fetchStats(); // Refresh stats
+            }
+        } catch (e) {
+            alert('❌ Failed to clear cache. Please try again.');
+            console.error('Cache clear error:', e);
+        } finally {
+            setClearing(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchStats();
+        // Refresh stats every 30 seconds
+        const interval = setInterval(fetchStats, 30000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const buttonStyle = {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        padding: '8px 16px',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        border: 'none',
+        borderRadius: '8px',
+        color: 'white',
+        fontSize: '0.85rem',
+        fontWeight: '600',
+        cursor: clearing ? 'wait' : 'pointer',
+        opacity: clearing ? 0.7 : 1,
+        transition: 'all 0.2s ease',
+        boxShadow: '0 2px 8px rgba(102, 126, 234, 0.3)'
+    };
+
+    const statsStyle = {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        padding: '6px 12px',
+        background: 'rgba(255, 255, 255, 0.1)',
+        borderRadius: '8px',
+        fontSize: '0.8rem',
+        color: 'rgba(255, 255, 255, 0.8)'
+    };
+
+    const containerStyle = {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        flexWrap: 'wrap'
+    };
+
+    return (
+        <div style={containerStyle}>
+            {stats && stats.valid_entries > 0 && (
+                <div style={statsStyle} title={`TTL: ${stats.ttl_hours} hour(s)\nOldest: ${stats.oldest_age_minutes} min`}>
+                    <span style={{ fontSize: '1rem' }}>📦</span>
+                    <span>{stats.valid_entries} cached</span>
+                    {stats.oldest_age_minutes > 0 && (
+                        <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' }}>
+                            ({stats.oldest_age_minutes}m ago)
+                        </span>
+                    )}
+                </div>
+            )}
+            <button
+                onClick={clearCache}
+                disabled={clearing}
+                style={buttonStyle}
+                title="Clear all cached data to fetch fresh stock information"
+            >
+                {clearing ? (
+                    <>
+                        <span style={{ animation: 'spin 1s linear infinite' }}>⏳</span>
+                        <span>Clearing...</span>
+                    </>
+                ) : (
+                    <>
+                        <span>🗑️</span>
+                        <span>Clear Cache</span>
+                    </>
+                )}
+            </button>
+        </div>
+    );
+}
+
 function App() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -37,9 +152,12 @@ function App() {
 
     return (
         <div className="container">
-            <header className="header">
-                <h1>Stock Analyzer Pro</h1>
-                <p>Professional Technical Analysis & Sentiment</p>
+            <header className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                <div>
+                    <h1>Stock Analyzer Pro</h1>
+                    <p>Professional Technical Analysis & Sentiment</p>
+                </div>
+                <CacheControl />
             </header>
 
             <Search onSearch={handleSearch} disabled={loading} />
