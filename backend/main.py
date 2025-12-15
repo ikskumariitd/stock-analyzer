@@ -1033,6 +1033,295 @@ async def scheduled_email_report():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================
+# YouTube Stock Extraction Feature
+# ============================================
+
+import google.generativeai as genai
+from youtube_transcript_api import YouTubeTranscriptApi
+import re
+import urllib.request
+import json as json_lib
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+# Configure Gemini
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
+# YouTube channels to monitor - using @handle format
+YOUTUBE_CHANNELS = {
+    "ZipTrader": "@ZipTrader"  # ZipTrader handle
+}
+
+
+def get_channel_videos(channel_handle: str, max_results: int = 5) -> List[Dict]:
+    """Fetch latest videos from a YouTube channel using web scraping."""
+    try:
+        # Use handle-based URL (more reliable)
+        if channel_handle.startswith("@"):
+            url = f"https://www.youtube.com/{channel_handle}/videos"
+        else:
+            url = f"https://www.youtube.com/channel/{channel_handle}/videos"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9'
+        }
+        
+        print(f"  Fetching URL: {url}")
+        request = urllib.request.Request(url, headers=headers)
+        response = urllib.request.urlopen(request, timeout=15)
+        html = response.read().decode('utf-8')
+        print(f"  HTML length: {len(html)} chars")
+        
+        # Extract video IDs from the page
+        video_ids = re.findall(r'"videoId":"([a-zA-Z0-9_-]{11})"', html)
+        unique_ids = list(dict.fromkeys(video_ids))[:max_results]
+        print(f"  Found {len(unique_ids)} unique video IDs")
+        
+        # Extract video titles
+        titles = re.findall(r'"title":\{"runs":\[\{"text":"([^"]+)"\}\]', html)
+        
+        # Extract publish dates (e.g., "1 day ago", "2 weeks ago")
+        publish_texts = re.findall(r'"publishedTimeText":\{"simpleText":"([^"]+)"\}', html)
+        
+        videos = []
+        for i, vid_id in enumerate(unique_ids):
+            title = titles[i] if i < len(titles) else f"Video {i+1}"
+            publish_date = publish_texts[i] if i < len(publish_texts) else "Unknown"
+            videos.append({
+                "video_id": vid_id,
+                "title": title,
+                "url": f"https://www.youtube.com/watch?v={vid_id}",
+                "published": publish_date
+            })
+            print(f"  Video {i+1}: {vid_id} - {title[:50]}...")
+        
+        return videos
+    except Exception as e:
+        print(f"Error fetching channel videos: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
+def get_video_transcript(video_id: str) -> str:
+    """Get transcript/captions for a YouTube video."""
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        
+        try:
+            # 1. Try listing transcripts (robust method for v0.6.0+)
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            
+            # Find English transcript (manual or auto-generated)
+            # This looks for 'en' or variations
+            transcript = transcript_list.find_transcript(['en', 'en-US', 'en-GB']) 
+            transcript_data = transcript.fetch()
+            
+        except Exception:
+            # Fallback for older interface if needed, or if listing fails
+            transcript_data = YouTubeTranscriptApi.get_transcript(video_id)
+            
+        full_text = " ".join([t['text'] for t in transcript_data])
+        return full_text
+        
+    except Exception as e:
+        print(f"Error getting transcript for {video_id}: {e}")
+        return ""
+
+
+@app.get("/api/debug-models")
+def list_gemini_models():
+    """List available Gemini models for debugging."""
+    if not GEMINI_API_KEY:
+        return {"error": "No API Key"}
+    try:
+        models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                models.append(m.name)
+        return {"models": models}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_video_description(video_id: str) -> str:
+    """Fetch video description via web scraping as a fallback."""
+    try:
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9'
+        }
+        request = urllib.request.Request(url, headers=headers)
+        response = urllib.request.urlopen(request, timeout=10)
+        html = response.read().decode('utf-8')
+        
+        # Method 1: Meta tag (simplest)
+        # <meta name="description" content="...">
+        match = re.search(r'<meta name="description" content="([^"]+)">', html)
+        if match:
+            desc = match.group(1)
+            # Unescape HTML entities
+            import html as html_lib
+            return html_lib.unescape(desc)
+            
+        return ""
+    except Exception as e:
+        print(f"Error fetching description for {video_id}: {e}")
+        return ""
+
+
+def extract_stocks_with_gemini(transcript: str, video_title: str) -> List[Dict]:
+    """Use Gemini AI to extract stock tickers from video transcript."""
+    if not GEMINI_API_KEY:
+        return []
+    
+    try:
+        model = genai.GenerativeModel('gemini-3-pro-preview')
+        
+        # Prepare content, truncating if too long
+        content_text = transcript[:15000]
+        
+        prompt = f"""Analyze this YouTube video content (transcript or description) about stocks and extract all stock tickers mentioned.
+
+Video Title: {video_title}
+
+Content:
+{content_text}
+
+Instructions:
+1. Identify stock tickers (e.g., AAPL, TSLA, PLTR).
+2. Determine sentiment for each (BULLISH, BEARISH, NEUTRAL).
+3. Provide a brief reason (max 10 words) based on the text.
+4. Output strict JSON array format.
+
+Output Format:
+[
+  {{
+    "ticker": "TICKER",
+    "sentiment": "BULLISH",
+    "reason": "Brief reason"
+  }}
+]
+
+If no stocks are mentioned, return empty list [].
+Only return valid JSON, no other text."""
+
+        response = model.generate_content(prompt)
+        response_text = response.text.strip()
+        
+        # Clean markdown formatting from response
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0]
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0]
+        
+        stocks = json_lib.loads(response_text)
+        return stocks if isinstance(stocks, list) else []
+        
+    except Exception as e:
+        print(f"Gemini extraction error: {e}")
+        return []
+
+
+@app.get("/api/youtube-stocks")
+async def get_youtube_stock_recommendations():
+    """
+    Fetch latest videos from monitored YouTube channels and extract stock recommendations.
+    """
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="Gemini API key not configured")
+    
+    try:
+        all_recommendations = []
+        
+        for channel_name, channel_id in YOUTUBE_CHANNELS.items():
+            print(f"Fetching videos from {channel_name}...")
+            videos = get_channel_videos(channel_id, max_results=5)
+            
+            for video in videos:
+                print(f"  Processing: {video['title']}")
+                
+                # 1. Try Transcript
+                content = get_video_transcript(video['video_id'])
+                content_type = "transcript"
+                
+                # 2. Fallback to Description
+                if not content or len(content) < 50:
+                    print(f"  No transcript for {video['video_id']}, trying description...")
+                    content = get_video_description(video['video_id'])
+                    content_type = "description"
+                
+                if content:
+                    print(f"  Analyzing {content_type} ({len(content)} chars)...")
+                    stocks = extract_stocks_with_gemini(content, video['title'])
+                    
+                    for stock in stocks:
+                        all_recommendations.append({
+                            "ticker": stock.get('ticker', '').upper(),
+                            "sentiment": stock.get('sentiment', 'NEUTRAL'),
+                            "reason": stock.get('reason', ''),
+                            "source": channel_name,
+                            "video_title": video['title'],
+                            "video_url": video['url'],
+                            "published": video.get('published', 'Unknown')
+                        })
+        
+        # Consolidate by ticker (combine mentions from multiple videos)
+        consolidated = {}
+        for rec in all_recommendations:
+            ticker = rec['ticker']
+            if ticker not in consolidated:
+                consolidated[ticker] = {
+                    "ticker": ticker,
+                    "sentiment": rec['sentiment'],
+                    "mentions": 1,
+                    "sources": [{"channel": rec['source'], "video": rec['video_title'], "url": rec['video_url'], "reason": rec['reason'], "published": rec.get('published', 'Unknown')}]
+                }
+            else:
+                consolidated[ticker]['mentions'] += 1
+                consolidated[ticker]['sources'].append({
+                    "channel": rec['source'],
+                    "video": rec['video_title'],
+                    "url": rec['video_url'],
+                    "reason": rec['reason'],
+                    "published": rec.get('published', 'Unknown')
+                })
+        
+        # Sort by mentions (most mentioned first)
+        sorted_recommendations = sorted(consolidated.values(), key=lambda x: x['mentions'], reverse=True)
+        
+        return {
+            "success": True,
+            "recommendations": sorted_recommendations,
+            "channels_scanned": list(YOUTUBE_CHANNELS.keys()),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        print(f"YouTube stocks error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/youtube-video-list")
+def get_youtube_video_list():
+    """Fetch latest video titles without Gemini analysis."""
+    try:
+        results = []
+        for channel_name, channel_id in YOUTUBE_CHANNELS.items():
+            videos = get_channel_videos(channel_id, max_results=5)
+            for v in videos:
+                v['channel'] = channel_name
+            results.extend(videos)
+        return {"success": True, "videos": results}
+    except Exception as e:
+        print(f"Video list error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
