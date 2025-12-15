@@ -459,6 +459,17 @@ function CSPSummaryTable({ stocks }) {
                                     textTransform: 'uppercase',
                                     letterSpacing: '0.5px'
                                 }}>
+                                    1D Change
+                                </th>
+                                <th style={{
+                                    textAlign: 'left',
+                                    padding: '0.75rem 1rem',
+                                    color: '#555',
+                                    fontWeight: 600,
+                                    fontSize: '0.8rem',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.5px'
+                                }}>
                                     RSI
                                 </th>
                                 <th style={{
@@ -547,6 +558,20 @@ function CSPSummaryTable({ stocks }) {
                                             color: '#2e7d32'
                                         }}>
                                             ${stock.price?.toFixed(2) || 'N/A'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.75rem 1rem',
+                                            fontWeight: 600,
+                                            color: stock.change_1d >= 0 ? '#27ae60' : '#e74c3c'
+                                        }}>
+                                            {stock.change_1d !== null && stock.change_1d !== undefined ? (
+                                                <>
+                                                    {stock.change_1d >= 0 ? '+' : ''}{stock.change_1d.toFixed(2)}
+                                                    <span style={{ fontSize: '0.8rem', marginLeft: '4px', opacity: 0.8 }}>
+                                                        ({stock.change_1d_pct >= 0 ? '+' : ''}{stock.change_1d_pct?.toFixed(2)}%)
+                                                    </span>
+                                                </>
+                                            ) : 'N/A'}
                                         </td>
                                         <td style={{
                                             padding: '0.75rem 1rem'

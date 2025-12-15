@@ -364,6 +364,16 @@ def _analyze_ticker(ticker: str):
     
     current_price = hist['Close'].iloc[-1]
     
+    # Calculate 1-day change
+    if len(hist) >= 2:
+        previous_close = hist['Close'].iloc[-2]
+        change_1d = current_price - previous_close
+        change_1d_pct = (change_1d / previous_close) * 100
+    else:
+        previous_close = current_price
+        change_1d = 0
+        change_1d_pct = 0
+    
     # Calculate Indicators
     # RSI
     hist['RSI'] = ta.rsi(hist['Close'], length=14)
@@ -396,6 +406,8 @@ def _analyze_ticker(ticker: str):
     data = {
         "symbol": ticker,
         "price": sanitize(round(current_price, 2)),
+        "change_1d": sanitize(round(change_1d, 2)),
+        "change_1d_pct": sanitize(round(change_1d_pct, 2)),
         "indicators": {
             "RSI": sanitize(round(hist['RSI'].iloc[-1], 2)),
             "BB_Upper": sanitize(round(bb_upper, 2)),
