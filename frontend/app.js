@@ -265,13 +265,17 @@ function MarketNews() {
 
 function YouTubeStocks() {
     const [recommendations, setRecommendations] = useState([]);
+    const [videoList, setVideoList] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [listLoading, setListLoading] = useState(false);
     const [error, setError] = useState(null);
     const [lastFetched, setLastFetched] = useState(null);
+    const [viewMode, setViewMode] = useState('recommendations'); // 'recommendations' or 'list'
 
     const fetchRecommendations = async () => {
         setLoading(true);
         setError(null);
+        setViewMode('recommendations');
         try {
             const res = await fetch('/api/youtube-stocks');
             if (!res.ok) {
@@ -285,6 +289,25 @@ function YouTubeStocks() {
             setError(err.message);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchVideoList = async () => {
+        setListLoading(true);
+        setError(null);
+        setViewMode('list');
+        try {
+            const res = await fetch('/api/youtube-video-list');
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Failed to fetch videos');
+            }
+            const data = await res.json();
+            setVideoList(data.videos || []);
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setListLoading(false);
         }
     };
 
@@ -312,7 +335,9 @@ function YouTubeStocks() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                marginBottom: '1rem'
+                marginBottom: '1rem',
+                flexWrap: 'wrap',
+                gap: '1rem'
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     <span style={{ fontSize: '1.5rem' }}>🎬</span>
@@ -334,22 +359,44 @@ function YouTubeStocks() {
                         AI-Powered
                     </span>
                 </div>
-                <button
-                    onClick={fetchRecommendations}
-                    disabled={loading}
-                    style={{
-                        padding: '0.5rem 1rem',
-                        background: loading ? 'rgba(102, 126, 234, 0.5)' : 'linear-gradient(135deg, #667eea, #764ba2)',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '8px',
-                        cursor: loading ? 'not-allowed' : 'pointer',
-                        fontSize: '0.85rem',
-                        fontWeight: 600
-                    }}
-                >
-                    {loading ? '⏳ Scanning...' : '🔍 Scan ZipTrader'}
-                </button>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                        onClick={fetchVideoList}
+                        disabled={loading || listLoading}
+                        style={{
+                            padding: '0.5rem 1rem',
+                            background: listLoading ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.05)',
+                            border: '1px solid rgba(255, 255, 255, 0.2)',
+                            color: 'white',
+                            borderRadius: '8px',
+                            cursor: (loading || listLoading) ? 'not-allowed' : 'pointer',
+                            fontSize: '0.85rem',
+                            fontWeight: 600,
+                            transition: 'all 0.2s ease'
+                        }}
+                        onMouseEnter={(e) => !listLoading && (e.target.style.background = 'rgba(255, 255, 255, 0.1)')}
+                        onMouseLeave={(e) => !listLoading && (e.target.style.background = 'rgba(255, 255, 255, 0.05)')}
+                    >
+                        {listLoading ? '⏳ Fetching...' : '📺 Latest Videos'}
+                    </button>
+                    <button
+                        onClick={fetchRecommendations}
+                        disabled={loading || listLoading}
+                        style={{
+                            padding: '0.5rem 1rem',
+                            background: loading ? 'rgba(102, 126, 234, 0.5)' : 'linear-gradient(135deg, #667eea, #764ba2)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: (loading || listLoading) ? 'not-allowed' : 'pointer',
+                            fontSize: '0.85rem',
+                            fontWeight: 600,
+                            boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)'
+                        }}
+                    >
+                        {loading ? '⏳ Scanning...' : '🔍 AI Scan Latest'}
+                    </button>
+                </div>
             </div>
 
             {error && (
@@ -358,9 +405,9 @@ function YouTubeStocks() {
                 </div>
             )}
 
-            {!loading && recommendations.length === 0 && !error && (
+            {!loading && !listLoading && recommendations.length === 0 && videoList.length === 0 && !error && (
                 <div style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '2rem' }}>
-                    Click "Scan ZipTrader" to extract stock recommendations from latest videos
+                    Select an option to fetch YouTube content
                 </div>
             )}
 
@@ -371,7 +418,53 @@ function YouTubeStocks() {
                 </div>
             )}
 
-            {recommendations.length > 0 && (
+            {listLoading && (
+                <div style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '2rem' }}>
+                    <div>📺 Fetching video list...</div>
+                </div>
+            )}
+
+            {/* Video List View */}
+            {!listLoading && viewMode === 'list' && videoList.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                        Latest Uploads (Raw List)
+                    </div>
+                    {videoList.map((video, idx) => (
+                        <a
+                            key={idx}
+                            href={video.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '1rem',
+                                background: 'rgba(255, 255, 255, 0.03)',
+                                borderRadius: '12px',
+                                padding: '1rem',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                textDecoration: 'none',
+                                color: 'inherit',
+                                transition: 'background 0.2s ease'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)'}
+                        >
+                            <span style={{ fontSize: '1.5rem' }}>▶️</span>
+                            <div>
+                                <div style={{ fontWeight: 600, marginBottom: '0.25rem', color: '#fff' }}>{video.title}</div>
+                                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                    {video.published} • {video.channel}
+                                </div>
+                            </div>
+                        </a>
+                    ))}
+                </div>
+            )}
+
+            {/* Recommendations View */}
+            {!loading && viewMode === 'recommendations' && recommendations.length > 0 && (
                 <>
                     {lastFetched && (
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>

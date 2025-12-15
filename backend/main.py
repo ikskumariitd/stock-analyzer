@@ -5,9 +5,22 @@ import pandas as pd
 import pandas_ta as ta
 from textblob import TextBlob
 from datetime import datetime
+import os
+import google.generativeai as genai
+from dotenv import load_dotenv
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+
+# Load environment variables
+load_dotenv()
+
+# Initialize Gemini
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+else:
+    print("Warning: GEMINI_API_KEY not found in environment variables.")
 
 app = FastAPI()
 
@@ -1240,7 +1253,8 @@ async def get_youtube_stock_recommendations():
         
         for channel_name, channel_id in YOUTUBE_CHANNELS.items():
             print(f"Fetching videos from {channel_name}...")
-            videos = get_channel_videos(channel_id, max_results=5)
+            # Optimization: Only fetch the latest 1 video per channel for faster analysis
+            videos = get_channel_videos(channel_id, max_results=1)
             
             for video in videos:
                 print(f"  Processing: {video['title']}")
