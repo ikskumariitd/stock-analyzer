@@ -534,6 +534,129 @@ async def get_csp_metrics(ticker: str):
         print(f"CSP metrics error for {ticker}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/market-news")
+async def get_market_news(tickers: str = ""):
+    """
+    Get top market news that could affect overall market sentiment or individual stocks.
+    Pass comma-separated tickers to include stock-specific news, or leave empty for general market news.
+    """
+    from datetime import datetime
+    import math
+    
+    def sanitize(val):
+        if val is None:
+            return None
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return None
+        return val
+    
+    try:
+        all_news = []
+        seen_titles = set()  # To avoid duplicates
+        
+        # Always include general market tickers for broader market sentiment
+        market_tickers = ["SPY", "QQQ", "DIA"]
+        
+        # Add user-specified tickers
+        if tickers:
+            user_tickers = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+            market_tickers.extend(user_tickers)
+        
+        # Remove duplicates while preserving order
+        unique_tickers = list(dict.fromkeys(market_tickers))
+        
+        for ticker_symbol in unique_tickers:
+            try:
+                stock = yf.Ticker(ticker_symbol)
+                news = stock.news
+                
+                if news:
+                    for article in news[:5]:  # Get top 5 per ticker
+                        # Handle both old and new yfinance formats
+                        content = article.get('content', article)
+                        
+                        title = content.get('title', '')
+                        if not title:
+                            continue
+                        
+                        # Skip if we've seen this title
+                        if title in seen_titles:
+                            continue
+                        seen_titles.add(title)
+                        
+                        # Calculate sentiment
+                        blob = TextBlob(title)
+                        sentiment_score = blob.sentiment.polarity
+                        
+                        if sentiment_score > 0.1:
+                            sentiment = "bullish"
+                        elif sentiment_score < -0.1:
+                            sentiment = "bearish"
+                        else:
+                            sentiment = "neutral"
+                        
+                        # Extract publish time - handle both formats
+                        publish_time = article.get('providerPublishTime', 0)
+                        pub_date_str = content.get('pubDate', '')
+                        
+                        if pub_date_str:
+                            try:
+                                # New format: ISO string like "2025-12-12T17:19:04Z"
+                                publish_date = datetime.strptime(pub_date_str[:19], "%Y-%m-%dT%H:%M:%S")
+                                publish_time = int(publish_date.timestamp())
+                            except:
+                                publish_date = datetime.now()
+                        elif publish_time:
+                            publish_date = datetime.fromtimestamp(publish_time)
+                        else:
+                            publish_date = datetime.now()
+                        
+                        # Get publisher - handle both formats
+                        provider = content.get('provider', {})
+                        publisher = provider.get('displayName', content.get('publisher', 'Unknown')) if isinstance(provider, dict) else 'Unknown'
+                        
+                        # Get link - handle both formats
+                        click_through = content.get('clickThroughUrl', {})
+                        link = click_through.get('url', article.get('link', '')) if isinstance(click_through, dict) else article.get('link', '')
+                        
+                        # Get thumbnail - handle both formats
+                        thumbnail_data = content.get('thumbnail', article.get('thumbnail', {}))
+                        thumbnail_url = ''
+                        if thumbnail_data:
+                            resolutions = thumbnail_data.get('resolutions', [])
+                            if resolutions and len(resolutions) > 0:
+                                thumbnail_url = resolutions[0].get('url', '')
+                        
+                        all_news.append({
+                            "title": title,
+                            "link": link,
+                            "publisher": publisher,
+                            "published": publish_date.strftime("%Y-%m-%d %H:%M"),
+                            "timestamp": publish_time,
+                            "related_ticker": ticker_symbol if ticker_symbol not in ["SPY", "QQQ", "DIA"] else "Market",
+                            "sentiment": sentiment,
+                            "sentiment_score": round(sentiment_score, 3),
+                            "thumbnail": thumbnail_url
+                        })
+            except Exception as e:
+                print(f"Error fetching news for {ticker_symbol}: {e}")
+                continue
+        
+        # Sort by timestamp (newest first) and take top 10
+        all_news.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
+        top_news = all_news[:10]
+        
+        return {
+            "news": top_news,
+            "count": len(top_news),
+            "tickers_scanned": unique_tickers
+        }
+        
+    except Exception as e:
+        print(f"Market news error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

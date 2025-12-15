@@ -61,6 +61,206 @@ function App() {
     );
 }
 
+function MarketNews() {
+    const [news, setNews] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [expanded, setExpanded] = useState(false);
+
+    useEffect(() => {
+        fetch('/api/market-news')
+            .then(res => {
+                if (!res.ok) throw new Error('Failed to fetch news');
+                return res.json();
+            })
+            .then(data => {
+                setNews(data.news || []);
+                setLoading(false);
+            })
+            .catch(err => {
+                setError(err.message);
+                setLoading(false);
+            });
+    }, []);
+
+    const getSentimentStyle = (sentiment) => {
+        switch (sentiment) {
+            case 'bullish':
+                return { color: '#2ecc71', icon: '📈', bg: 'rgba(46, 204, 113, 0.1)' };
+            case 'bearish':
+                return { color: '#e74c3c', icon: '📉', bg: 'rgba(231, 76, 60, 0.1)' };
+            default:
+                return { color: '#95a5a6', icon: '📊', bg: 'rgba(149, 165, 166, 0.1)' };
+        }
+    };
+
+    const displayedNews = expanded ? news : news.slice(0, 5);
+
+    return (
+        <div style={{
+            background: 'linear-gradient(135deg, #1a1c2e, #252a40)',
+            borderRadius: '16px',
+            padding: '1.25rem',
+            marginBottom: '1.5rem',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)'
+        }}>
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '1rem'
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <span style={{ fontSize: '1.5rem' }}>📰</span>
+                    <h3 style={{
+                        margin: 0,
+                        fontSize: '1.2rem',
+                        fontWeight: 700,
+                        background: 'linear-gradient(135deg, #f39c12, #e74c3c)',
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent'
+                    }}>
+                        Top Market News
+                    </h3>
+                </div>
+                {news.length > 5 && (
+                    <button
+                        onClick={() => setExpanded(!expanded)}
+                        style={{
+                            background: 'rgba(255, 255, 255, 0.05)',
+                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            borderRadius: '20px',
+                            padding: '0.4rem 1rem',
+                            color: 'var(--text-secondary)',
+                            cursor: 'pointer',
+                            fontSize: '0.8rem',
+                            transition: 'all 0.2s ease'
+                        }}
+                        onMouseEnter={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.1)'}
+                        onMouseLeave={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.05)'}
+                    >
+                        {expanded ? 'Show Less' : `Show All (${news.length})`}
+                    </button>
+                )}
+            </div>
+
+            {loading && (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-secondary)' }}>
+                    Fetching latest market news...
+                </div>
+            )}
+
+            {error && (
+                <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-secondary)' }}>
+                    Unable to load news
+                </div>
+            )}
+
+            {!loading && !error && news.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-secondary)' }}>
+                    No news available
+                </div>
+            )}
+
+            {!loading && !error && news.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {displayedNews.map((item, idx) => {
+                        const sentimentStyle = getSentimentStyle(item.sentiment);
+                        return (
+                            <a
+                                key={idx}
+                                href={item.link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'flex-start',
+                                    gap: '0.75rem',
+                                    padding: '0.75rem',
+                                    background: 'rgba(255, 255, 255, 0.02)',
+                                    borderRadius: '10px',
+                                    textDecoration: 'none',
+                                    color: 'inherit',
+                                    transition: 'all 0.2s ease',
+                                    border: '1px solid transparent'
+                                }}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)';
+                                    e.currentTarget.style.borderColor = 'transparent';
+                                }}
+                            >
+                                <span style={{
+                                    fontSize: '1.2rem',
+                                    lineHeight: 1,
+                                    marginTop: '2px'
+                                }}>
+                                    {sentimentStyle.icon}
+                                </span>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{
+                                        fontSize: '0.9rem',
+                                        fontWeight: 500,
+                                        lineHeight: 1.4,
+                                        marginBottom: '0.35rem',
+                                        color: '#fff',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        display: '-webkit-box',
+                                        WebkitLineClamp: 2,
+                                        WebkitBoxOrient: 'vertical'
+                                    }}>
+                                        {item.title}
+                                    </div>
+                                    <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.75rem',
+                                        fontSize: '0.75rem',
+                                        color: 'var(--text-secondary)'
+                                    }}>
+                                        <span>{item.publisher}</span>
+                                        <span>•</span>
+                                        <span>{item.published}</span>
+                                        {item.related_ticker && (
+                                            <>
+                                                <span>•</span>
+                                                <span style={{
+                                                    padding: '0.15rem 0.4rem',
+                                                    background: 'rgba(102, 126, 234, 0.2)',
+                                                    borderRadius: '4px',
+                                                    fontWeight: 600,
+                                                    color: '#667eea'
+                                                }}>
+                                                    {item.related_ticker}
+                                                </span>
+                                            </>
+                                        )}
+                                        <span style={{
+                                            padding: '0.15rem 0.4rem',
+                                            background: sentimentStyle.bg,
+                                            borderRadius: '4px',
+                                            fontWeight: 500,
+                                            color: sentimentStyle.color,
+                                            textTransform: 'capitalize'
+                                        }}>
+                                            {item.sentiment}
+                                        </span>
+                                    </div>
+                                </div>
+                            </a>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function Search({ onSearch, disabled }) {
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(true);
@@ -132,10 +332,16 @@ function CSPSummaryTable({ stocks }) {
             for (const stock of stocks) {
                 if (stock.error || !stock.symbol) continue;
                 try {
-                    const res = await fetch(`/api/volatility/${stock.symbol}`);
-                    if (res.ok) {
-                        results[stock.symbol] = await res.json();
-                    }
+                    // Fetch both volatility and CSP metrics in parallel
+                    const [volRes, metricsRes] = await Promise.all([
+                        fetch(`/api/volatility/${stock.symbol}`),
+                        fetch(`/api/csp-metrics/${stock.symbol}`)
+                    ]);
+
+                    const volData = volRes.ok ? await volRes.json() : {};
+                    const metricsData = metricsRes.ok ? await metricsRes.json() : {};
+
+                    results[stock.symbol] = { ...volData, ...metricsData };
                 } catch (e) {
                     console.error(`Failed to fetch CSP data for ${stock.symbol}`);
                 }
@@ -253,6 +459,39 @@ function CSPSummaryTable({ stocks }) {
                                     textTransform: 'uppercase',
                                     letterSpacing: '0.5px'
                                 }}>
+                                    RSI
+                                </th>
+                                <th style={{
+                                    textAlign: 'left',
+                                    padding: '0.75rem 1rem',
+                                    color: '#555',
+                                    fontWeight: 600,
+                                    fontSize: '0.8rem',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.5px'
+                                }}>
+                                    52W Low
+                                </th>
+                                <th style={{
+                                    textAlign: 'left',
+                                    padding: '0.75rem 1rem',
+                                    color: '#555',
+                                    fontWeight: 600,
+                                    fontSize: '0.8rem',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.5px'
+                                }}>
+                                    52W High
+                                </th>
+                                <th style={{
+                                    textAlign: 'left',
+                                    padding: '0.75rem 1rem',
+                                    color: '#555',
+                                    fontWeight: 600,
+                                    fontSize: '0.8rem',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.5px'
+                                }}>
                                     IV/HV Rank
                                 </th>
                                 <th style={{
@@ -280,9 +519,16 @@ function CSPSummaryTable({ stocks }) {
                                         style={{
                                             borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
                                             transition: 'background 0.2s ease',
+                                            cursor: 'pointer',
                                             background: idx === 0 && rating.text === 'Excellent'
                                                 ? 'rgba(155, 89, 182, 0.08)'
                                                 : 'transparent'
+                                        }}
+                                        onClick={() => {
+                                            const element = document.getElementById(`stock-${stock.symbol}`);
+                                            if (element) {
+                                                element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                            }
                                         }}
                                         onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(0, 0, 0, 0.03)'}
                                         onMouseLeave={(e) => e.currentTarget.style.background = idx === 0 && rating.text === 'Excellent' ? 'rgba(155, 89, 182, 0.08)' : 'transparent'}
@@ -301,6 +547,48 @@ function CSPSummaryTable({ stocks }) {
                                             color: '#2e7d32'
                                         }}>
                                             ${stock.price?.toFixed(2) || 'N/A'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.75rem 1rem'
+                                        }}>
+                                            {(() => {
+                                                const rsi = stock.indicators?.RSI;
+                                                if (rsi === null || rsi === undefined) {
+                                                    return <span style={{ color: '#999' }}>N/A</span>;
+                                                }
+                                                let rsiColor = '#666';
+                                                let rsiLabel = '';
+                                                if (rsi > 70) {
+                                                    rsiColor = '#e74c3c';
+                                                    rsiLabel = 'OB';
+                                                } else if (rsi < 30) {
+                                                    rsiColor = '#27ae60';
+                                                    rsiLabel = 'OS';
+                                                }
+                                                return (
+                                                    <span style={{
+                                                        fontWeight: 600,
+                                                        color: rsiColor
+                                                    }}>
+                                                        {rsi.toFixed(1)}
+                                                        {rsiLabel && <span style={{ fontSize: '0.7rem', marginLeft: '4px' }}>({rsiLabel})</span>}
+                                                    </span>
+                                                );
+                                            })()}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.75rem 1rem',
+                                            fontWeight: 500,
+                                            color: '#27ae60'
+                                        }}>
+                                            {volData?.week52_low ? `$${volData.week52_low.toFixed(2)}` : 'N/A'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.75rem 1rem',
+                                            fontWeight: 500,
+                                            color: '#e74c3c'
+                                        }}>
+                                            {volData?.week52_high ? `$${volData.week52_high.toFixed(2)}` : 'N/A'}
                                         </td>
                                         <td style={{
                                             padding: '0.75rem 1rem'
@@ -374,7 +662,7 @@ function StockAnalysis({ data }) {
     }
 
     return (
-        <div className="stock-grid-item">
+        <div className="stock-grid-item" id={`stock-${data.symbol}`}>
             <div className="header-row">
                 <div>
                     <h2 style={{ fontSize: '1.8rem', fontWeight: 700, margin: 0 }}>{data.symbol}</h2>
