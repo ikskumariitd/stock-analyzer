@@ -1141,112 +1141,275 @@ function Week52RangeGauge({ currentPrice, high, low, position }) {
 const { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } = Recharts;
 
 function PriceChart({ symbol }) {
-    const [historyData, setHistoryData] = useState(null);
+    const chartContainerRef = React.useRef(null);
+    const chartRef = React.useRef(null);
+    const seriesRef = React.useRef(null);
+    const [period, setPeriod] = useState('3y');
+    const [chartType, setChartType] = useState('area'); // 'area' or 'candlestick'
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
+    const periods = [
+        { label: '1W', value: '5d' },
+        { label: '1M', value: '1mo' },
+        { label: '3M', value: '3mo' },
+        { label: '6M', value: '6mo' },
+        { label: '1Y', value: '1y' },
+        { label: '3Y', value: '3y' },
+        { label: '5Y', value: '5y' },
+    ];
+
     useEffect(() => {
+        if (!chartContainerRef.current) return;
+
+        // Create chart
+        const chart = LightweightCharts.createChart(chartContainerRef.current, {
+            width: chartContainerRef.current.clientWidth,
+            height: 300,
+            layout: {
+                background: { type: 'solid', color: 'transparent' },
+                textColor: '#9ca3af',
+            },
+            grid: {
+                vertLines: { color: 'rgba(255, 255, 255, 0.05)' },
+                horzLines: { color: 'rgba(255, 255, 255, 0.05)' },
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+            },
+            rightPriceScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+            },
+            timeScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+                timeVisible: true,
+                secondsVisible: false,
+            },
+            handleScroll: {
+                vertTouchDrag: false,
+            },
+        });
+
+        chartRef.current = chart;
+
+        // Handle resize
+        const handleResize = () => {
+            if (chartContainerRef.current) {
+                chart.applyOptions({ width: chartContainerRef.current.clientWidth });
+            }
+        };
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            chart.remove();
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!chartRef.current) return;
+
         setLoading(true);
         setError(null);
 
-        fetch(`/api/history/${symbol}?period=3y`)
+        fetch(`/api/history/${symbol}?period=${period}`)
             .then(res => {
                 if (!res.ok) throw new Error('Failed to fetch history');
                 return res.json();
             })
             .then(data => {
-                setHistoryData(data.history);
+                if (!data.history || data.history.length === 0) {
+                    throw new Error('No data');
+                }
+
+                // Remove old series
+                if (seriesRef.current) {
+                    chartRef.current.removeSeries(seriesRef.current);
+                }
+
+                // Calculate if up or down
+                const firstPrice = data.history[0]?.close || 0;
+                const lastPrice = data.history[data.history.length - 1]?.close || 0;
+                const isUp = lastPrice >= firstPrice;
+
+                if (chartType === 'candlestick') {
+                    // Candlestick chart
+                    const candlestickSeries = chartRef.current.addCandlestickSeries({
+                        upColor: '#26a69a',
+                        downColor: '#ef5350',
+                        borderVisible: false,
+                        wickUpColor: '#26a69a',
+                        wickDownColor: '#ef5350',
+                    });
+
+                    const candleData = data.history.map(item => ({
+                        time: item.date,
+                        open: item.open,
+                        high: item.high,
+                        low: item.low,
+                        close: item.close,
+                    }));
+
+                    candlestickSeries.setData(candleData);
+                    seriesRef.current = candlestickSeries;
+                } else {
+                    // Area chart
+                    const areaSeries = chartRef.current.addAreaSeries({
+                        lineColor: isUp ? '#26a69a' : '#ef5350',
+                        topColor: isUp ? 'rgba(38, 166, 154, 0.4)' : 'rgba(239, 83, 80, 0.4)',
+                        bottomColor: isUp ? 'rgba(38, 166, 154, 0.0)' : 'rgba(239, 83, 80, 0.0)',
+                        lineWidth: 2,
+                    });
+
+                    const areaData = data.history.map(item => ({
+                        time: item.date,
+                        value: item.close,
+                    }));
+
+                    areaSeries.setData(areaData);
+                    seriesRef.current = areaSeries;
+                }
+
+                chartRef.current.timeScale().fitContent();
                 setLoading(false);
             })
             .catch(err => {
                 setError(err.message);
                 setLoading(false);
             });
-    }, [symbol]);
-
-    if (loading) {
-        return (
-            <div style={{ height: '150px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
-                Loading chart...
-            </div>
-        );
-    }
-
-    if (error || !historyData || historyData.length === 0) {
-        return (
-            <div style={{ height: '150px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
-                Chart unavailable
-            </div>
-        );
-    }
-
-    // Calculate if price is up or down overall
-    const firstPrice = historyData[0]?.close || 0;
-    const lastPrice = historyData[historyData.length - 1]?.close || 0;
-    const isUp = lastPrice >= firstPrice;
-    const chartColor = isUp ? 'var(--success)' : 'var(--danger)';
-
-    // Custom tooltip
-    const CustomTooltip = ({ active, payload, label }) => {
-        if (active && payload && payload.length) {
-            const data = payload[0].payload;
-            return (
-                <div style={{
-                    background: 'var(--bg-card)',
-                    border: '1px solid rgba(0,0,0,0.1)',
-                    borderRadius: '8px',
-                    padding: '10px',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-                }}>
-                    <div style={{ fontWeight: 600, marginBottom: '4px' }}>{data.date}</div>
-                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                        <div>Open: ${data.open}</div>
-                        <div>High: ${data.high}</div>
-                        <div>Low: ${data.low}</div>
-                        <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Close: ${data.close}</div>
-                    </div>
-                </div>
-            );
-        }
-        return null;
-    };
+    }, [symbol, period, chartType]);
 
     return (
-        <div style={{ width: '100%', height: '150px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={historyData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
-                    <defs>
-                        <linearGradient id={`gradient-${symbol}`} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor={chartColor} stopOpacity={0.3} />
-                            <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
-                        </linearGradient>
-                    </defs>
-                    <XAxis
-                        dataKey="date"
-                        tick={{ fontSize: 10, fill: 'var(--text-secondary)' }}
-                        tickFormatter={(val) => {
-                            // val is "YYYY-MM-DD", extract MM and YY
-                            const parts = val.split('-');
-                            return `${parts[1]}-${parts[0].slice(2)}`;
+        <div>
+            {/* Controls */}
+            <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '0.75rem',
+                flexWrap: 'wrap',
+                gap: '0.5rem'
+            }}>
+                {/* Timeline buttons */}
+                <div style={{ display: 'flex', gap: '0.25rem' }}>
+                    {periods.map(p => (
+                        <button
+                            key={p.value}
+                            onClick={() => setPeriod(p.value)}
+                            style={{
+                                padding: '0.3rem 0.6rem',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                background: period === p.value
+                                    ? 'linear-gradient(135deg, #667eea, #764ba2)'
+                                    : 'rgba(255, 255, 255, 0.05)',
+                                color: period === p.value ? '#fff' : 'var(--text-secondary)',
+                                transition: 'all 0.2s ease'
+                            }}
+                        >
+                            {p.label}
+                        </button>
+                    ))}
+                </div>
+
+                {/* Chart type toggle */}
+                <div style={{ display: 'flex', gap: '0.25rem' }}>
+                    <button
+                        onClick={() => setChartType('area')}
+                        style={{
+                            padding: '0.3rem 0.6rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            background: chartType === 'area'
+                                ? 'rgba(38, 166, 154, 0.2)'
+                                : 'rgba(255, 255, 255, 0.05)',
+                            color: chartType === 'area' ? '#26a69a' : 'var(--text-secondary)',
                         }}
-                        interval="preserveStartEnd"
-                    />
-                    <YAxis
-                        domain={['auto', 'auto']}
-                        tick={{ fontSize: 10, fill: 'var(--text-secondary)' }}
-                        tickFormatter={(val) => `$${val}`}
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Area
-                        type="monotone"
-                        dataKey="close"
-                        stroke={chartColor}
-                        strokeWidth={2}
-                        fill={`url(#gradient-${symbol})`}
-                        animationDuration={1000}
-                    />
-                </AreaChart>
-            </ResponsiveContainer>
+                    >
+                        📈 Area
+                    </button>
+                    <button
+                        onClick={() => setChartType('candlestick')}
+                        style={{
+                            padding: '0.3rem 0.6rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            background: chartType === 'candlestick'
+                                ? 'rgba(38, 166, 154, 0.2)'
+                                : 'rgba(255, 255, 255, 0.05)',
+                            color: chartType === 'candlestick' ? '#26a69a' : 'var(--text-secondary)',
+                        }}
+                    >
+                        🕯️ Candles
+                    </button>
+                </div>
+            </div>
+
+            {/* Chart container */}
+            <div style={{ position: 'relative' }}>
+                <div
+                    ref={chartContainerRef}
+                    style={{
+                        width: '100%',
+                        height: '300px',
+                        borderRadius: '8px',
+                        overflow: 'hidden'
+                    }}
+                />
+                {loading && (
+                    <div style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: 'rgba(0,0,0,0.5)',
+                        color: 'var(--text-secondary)',
+                        borderRadius: '8px'
+                    }}>
+                        Loading chart...
+                    </div>
+                )}
+                {error && (
+                    <div style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: 'rgba(0,0,0,0.5)',
+                        color: 'var(--danger)',
+                        borderRadius: '8px'
+                    }}>
+                        Chart unavailable
+                    </div>
+                )}
+            </div>
+
+            {/* Instructions */}
+            <div style={{
+                marginTop: '0.5rem',
+                fontSize: '0.7rem',
+                color: 'var(--text-secondary)',
+                textAlign: 'center'
+            }}>
+                🖱️ Scroll to zoom • Drag to pan • Double-click to reset
+            </div>
         </div>
     );
 }
