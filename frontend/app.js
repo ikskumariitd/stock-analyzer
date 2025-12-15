@@ -109,10 +109,253 @@ function Search({ onSearch, disabled }) {
 function Dashboard({ data }) {
     const stocks = Array.isArray(data) ? data : [data];
     return (
-        <div className="stock-grid">
-            {stocks.map((stock, idx) => (
-                <StockAnalysis key={stock.symbol || idx} data={stock} />
-            ))}
+        <div>
+            <CSPSummaryTable stocks={stocks} />
+            <div className="stock-grid">
+                {stocks.map((stock, idx) => (
+                    <StockAnalysis key={stock.symbol || idx} data={stock} />
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function CSPSummaryTable({ stocks }) {
+    const [cspData, setCspData] = useState({});
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchAllCSPData = async () => {
+            setLoading(true);
+            const results = {};
+
+            for (const stock of stocks) {
+                if (stock.error || !stock.symbol) continue;
+                try {
+                    const res = await fetch(`/api/volatility/${stock.symbol}`);
+                    if (res.ok) {
+                        results[stock.symbol] = await res.json();
+                    }
+                } catch (e) {
+                    console.error(`Failed to fetch CSP data for ${stock.symbol}`);
+                }
+            }
+
+            setCspData(results);
+            setLoading(false);
+        };
+
+        if (stocks && stocks.length > 0) {
+            fetchAllCSPData();
+        }
+    }, [stocks]);
+
+    // Determine CSP suitability rating
+    const getCSPRating = (volData) => {
+        if (!volData) return { text: 'N/A', color: 'var(--text-secondary)', icon: '⚪' };
+
+        const rank = volData.iv_rank !== null ? volData.iv_rank : volData.hv_rank;
+        if (rank === null) return { text: 'N/A', color: 'var(--text-secondary)', icon: '⚪' };
+
+        if (rank >= 75) {
+            return { text: 'Excellent', color: '#9b59b6', icon: '🟣', rank };
+        } else if (rank >= 50) {
+            return { text: 'Good', color: 'var(--success)', icon: '🟢', rank };
+        } else if (rank >= 25) {
+            return { text: 'Moderate', color: '#f39c12', icon: '🟡', rank };
+        } else {
+            return { text: 'Poor', color: 'var(--danger)', icon: '🔴', rank };
+        }
+    };
+
+    // Sort stocks by CSP suitability (best first)
+    const sortedStocks = [...stocks].filter(s => !s.error && s.symbol).sort((a, b) => {
+        const rankA = getCSPRating(cspData[a.symbol]).rank || 0;
+        const rankB = getCSPRating(cspData[b.symbol]).rank || 0;
+        return rankB - rankA;
+    });
+
+    return (
+        <div style={{
+            background: 'linear-gradient(135deg, #ffffff, #f8f9fc)',
+            borderRadius: '16px',
+            padding: '1.25rem',
+            marginBottom: '2rem',
+            border: '1px solid rgba(0, 0, 0, 0.1)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.08)'
+        }}>
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.75rem',
+                marginBottom: '1rem'
+            }}>
+                <span style={{ fontSize: '1.5rem' }}>📊</span>
+                <h3 style={{
+                    margin: 0,
+                    fontSize: '1.2rem',
+                    fontWeight: 700,
+                    background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent'
+                }}>
+                    CSP Opportunity Summary
+                </h3>
+            </div>
+
+            {loading ? (
+                <div style={{
+                    textAlign: 'center',
+                    padding: '1rem',
+                    color: 'var(--text-secondary)'
+                }}>
+                    Analyzing volatility data...
+                </div>
+            ) : (
+                <div style={{ overflowX: 'auto' }}>
+                    <table style={{
+                        width: '100%',
+                        borderCollapse: 'collapse',
+                        fontSize: '0.9rem'
+                    }}>
+                        <thead>
+                            <tr style={{
+                                borderBottom: '2px solid rgba(0, 0, 0, 0.1)'
+                            }}>
+                                <th style={{
+                                    textAlign: 'left',
+                                    padding: '0.75rem 1rem',
+                                    color: '#555',
+                                    fontWeight: 600,
+                                    fontSize: '0.8rem',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.5px'
+                                }}>
+                                    Symbol
+                                </th>
+                                <th style={{
+                                    textAlign: 'left',
+                                    padding: '0.75rem 1rem',
+                                    color: '#555',
+                                    fontWeight: 600,
+                                    fontSize: '0.8rem',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.5px'
+                                }}>
+                                    Price
+                                </th>
+                                <th style={{
+                                    textAlign: 'left',
+                                    padding: '0.75rem 1rem',
+                                    color: '#555',
+                                    fontWeight: 600,
+                                    fontSize: '0.8rem',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.5px'
+                                }}>
+                                    IV/HV Rank
+                                </th>
+                                <th style={{
+                                    textAlign: 'left',
+                                    padding: '0.75rem 1rem',
+                                    color: '#555',
+                                    fontWeight: 600,
+                                    fontSize: '0.8rem',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.5px'
+                                }}>
+                                    CSP Rating
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {sortedStocks.map((stock, idx) => {
+                                const volData = cspData[stock.symbol];
+                                const rating = getCSPRating(volData);
+                                const rank = volData?.iv_rank ?? volData?.hv_rank;
+
+                                return (
+                                    <tr
+                                        key={stock.symbol}
+                                        style={{
+                                            borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
+                                            transition: 'background 0.2s ease',
+                                            background: idx === 0 && rating.text === 'Excellent'
+                                                ? 'rgba(155, 89, 182, 0.08)'
+                                                : 'transparent'
+                                        }}
+                                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(0, 0, 0, 0.03)'}
+                                        onMouseLeave={(e) => e.currentTarget.style.background = idx === 0 && rating.text === 'Excellent' ? 'rgba(155, 89, 182, 0.08)' : 'transparent'}
+                                    >
+                                        <td style={{
+                                            padding: '0.75rem 1rem',
+                                            fontWeight: 700,
+                                            fontSize: '1rem',
+                                            color: '#1a1a2e'
+                                        }}>
+                                            {stock.symbol}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.75rem 1rem',
+                                            fontWeight: 600,
+                                            color: '#2e7d32'
+                                        }}>
+                                            ${stock.price?.toFixed(2) || 'N/A'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.75rem 1rem'
+                                        }}>
+                                            {rank !== null && rank !== undefined ? (
+                                                <div style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.5rem'
+                                                }}>
+                                                    <div style={{
+                                                        width: '60px',
+                                                        height: '6px',
+                                                        background: 'rgba(255, 255, 255, 0.1)',
+                                                        borderRadius: '3px',
+                                                        overflow: 'hidden'
+                                                    }}>
+                                                        <div style={{
+                                                            width: `${rank}%`,
+                                                            height: '100%',
+                                                            background: rating.color,
+                                                            borderRadius: '3px'
+                                                        }} />
+                                                    </div>
+                                                    <span style={{ fontWeight: 500 }}>{rank.toFixed(0)}%</span>
+                                                </div>
+                                            ) : (
+                                                <span style={{ color: 'var(--text-secondary)' }}>N/A</span>
+                                            )}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.75rem 1rem'
+                                        }}>
+                                            <span style={{
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: '0.5rem',
+                                                padding: '0.35rem 0.75rem',
+                                                borderRadius: '20px',
+                                                fontWeight: 600,
+                                                fontSize: '0.8rem',
+                                                color: rating.color,
+                                                background: `${rating.color}15`,
+                                                border: `1px solid ${rating.color}30`
+                                            }}>
+                                                {rating.icon} {rating.text}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            )}
         </div>
     );
 }
