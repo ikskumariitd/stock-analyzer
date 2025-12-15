@@ -323,6 +323,7 @@ function Dashboard({ data }) {
 function CSPSummaryTable({ stocks }) {
     const [cspData, setCspData] = useState({});
     const [loading, setLoading] = useState(true);
+    const [emailStatus, setEmailStatus] = useState(null); // null, 'sending', 'sent', 'error'
 
     useEffect(() => {
         const fetchAllCSPData = async () => {
@@ -381,6 +382,35 @@ function CSPSummaryTable({ stocks }) {
         return rankB - rankA;
     });
 
+    // Send email handler
+    const handleSendEmail = async () => {
+        setEmailStatus('sending');
+        try {
+            const response = await fetch('/api/send-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    stocks: stocks,
+                    csp_data: cspData
+                })
+            });
+
+            if (response.ok) {
+                setEmailStatus('sent');
+                setTimeout(() => setEmailStatus(null), 3000);
+            } else {
+                const err = await response.json();
+                console.error('Email error:', err);
+                setEmailStatus('error');
+                setTimeout(() => setEmailStatus(null), 3000);
+            }
+        } catch (e) {
+            console.error('Email error:', e);
+            setEmailStatus('error');
+            setTimeout(() => setEmailStatus(null), 3000);
+        }
+    };
+
     return (
         <div style={{
             background: 'linear-gradient(135deg, #ffffff, #f8f9fc)',
@@ -393,20 +423,53 @@ function CSPSummaryTable({ stocks }) {
             <div style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.75rem',
+                justifyContent: 'space-between',
                 marginBottom: '1rem'
             }}>
-                <span style={{ fontSize: '1.5rem' }}>📊</span>
-                <h3 style={{
-                    margin: 0,
-                    fontSize: '1.2rem',
-                    fontWeight: 700,
-                    background: 'linear-gradient(135deg, #667eea, #764ba2)',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent'
-                }}>
-                    CSP Opportunity Summary
-                </h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <span style={{ fontSize: '1.5rem' }}>📊</span>
+                    <h3 style={{
+                        margin: 0,
+                        fontSize: '1.2rem',
+                        fontWeight: 700,
+                        background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent'
+                    }}>
+                        CSP Opportunity Summary
+                    </h3>
+                </div>
+                <button
+                    onClick={handleSendEmail}
+                    disabled={loading || emailStatus === 'sending'}
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.5rem 1rem',
+                        background: emailStatus === 'sent' ? '#27ae60' :
+                            emailStatus === 'error' ? '#e74c3c' :
+                                'linear-gradient(135deg, #667eea, #764ba2)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: loading || emailStatus === 'sending' ? 'not-allowed' : 'pointer',
+                        fontSize: '0.85rem',
+                        fontWeight: 600,
+                        opacity: loading || emailStatus === 'sending' ? 0.7 : 1,
+                        transition: 'all 0.2s ease'
+                    }}
+                >
+                    {emailStatus === 'sending' ? (
+                        <>⏳ Sending...</>
+                    ) : emailStatus === 'sent' ? (
+                        <>✅ Sent!</>
+                    ) : emailStatus === 'error' ? (
+                        <>❌ Failed</>
+                    ) : (
+                        <>📧 Email Report</>
+                    )}
+                </button>
             </div>
 
             {loading ? (

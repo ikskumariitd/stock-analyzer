@@ -687,6 +687,352 @@ async def get_market_news(tickers: str = ""):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Email configuration
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+EMAIL_SENDER = os.environ.get("EMAIL_SENDER", "iks.kumar.iitd@gmail.com")
+EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "")
+EMAIL_RECIPIENT = os.environ.get("EMAIL_RECIPIENT", "iks.kumar.iitd@gmail.com")
+
+
+class EmailRequest(BaseModel):
+    stocks: List[Dict[str, Any]]
+    csp_data: Dict[str, Any]
+
+
+@app.post("/api/send-email")
+async def send_email_report(request: EmailRequest):
+    """Send CSP Opportunity Summary via email."""
+    
+    if not EMAIL_PASSWORD:
+        raise HTTPException(status_code=500, detail="Email not configured. Missing EMAIL_PASSWORD.")
+    
+    try:
+        stocks = request.stocks
+        csp_data = request.csp_data
+        
+        # Build HTML email content
+        html_content = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; background-color: #f5f5f5; padding: 20px; }}
+                .container {{ max-width: 800px; margin: 0 auto; background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
+                h1 {{ color: #1a1a2e; margin-bottom: 8px; }}
+                .subtitle {{ color: #666; font-size: 14px; margin-bottom: 24px; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 16px; }}
+                th {{ background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 12px; text-align: left; font-size: 12px; text-transform: uppercase; }}
+                td {{ padding: 12px; border-bottom: 1px solid #eee; }}
+                tr:hover {{ background-color: #f9f9f9; }}
+                .positive {{ color: #27ae60; font-weight: 600; }}
+                .negative {{ color: #e74c3c; font-weight: 600; }}
+                .excellent {{ color: #9b59b6; }}
+                .good {{ color: #27ae60; }}
+                .moderate {{ color: #f39c12; }}
+                .poor {{ color: #e74c3c; }}
+                .footer {{ margin-top: 24px; padding-top: 16px; border-top: 1px solid #eee; color: #999; font-size: 12px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>📊 CSP Opportunity Summary</h1>
+                <p class="subtitle">Generated on {datetime.now().strftime("%Y-%m-%d %H:%M")}</p>
+                
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Price</th>
+                            <th>1D Change</th>
+                            <th>RSI</th>
+                            <th>52W Low</th>
+                            <th>52W High</th>
+                            <th>IV/HV Rank</th>
+                            <th>CSP Rating</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        """
+        
+        # Sort stocks by CSP rating (IV/HV rank) - same order as UI
+        def get_rank(stock):
+            symbol = stock.get('symbol', '')
+            vol_data = csp_data.get(symbol, {})
+            iv_rank = vol_data.get('iv_rank')
+            hv_rank = vol_data.get('hv_rank')
+            rank = iv_rank if iv_rank is not None else hv_rank
+            return rank if rank is not None else -1
+        
+        sorted_stocks = sorted(
+            [s for s in stocks if not s.get('error')],
+            key=get_rank,
+            reverse=True  # Best (highest rank) first
+        )
+        
+        for stock in sorted_stocks:
+            symbol = stock.get('symbol', 'N/A')
+            price = stock.get('price', 0)
+            change_1d = stock.get('change_1d', 0)
+            change_1d_pct = stock.get('change_1d_pct', 0)
+            rsi = stock.get('indicators', {}).get('RSI', None)
+            
+            vol_data = csp_data.get(symbol, {})
+            week52_low = vol_data.get('week52_low')
+            week52_high = vol_data.get('week52_high')
+            iv_rank = vol_data.get('iv_rank')
+            hv_rank = vol_data.get('hv_rank')
+            rank = iv_rank if iv_rank is not None else hv_rank
+            
+            # Determine CSP rating
+            if rank is not None:
+                if rank >= 75:
+                    rating_text, rating_class = "Excellent", "excellent"
+                elif rank >= 50:
+                    rating_text, rating_class = "Good", "good"
+                elif rank >= 25:
+                    rating_text, rating_class = "Moderate", "moderate"
+                else:
+                    rating_text, rating_class = "Poor", "poor"
+            else:
+                rating_text, rating_class = "N/A", ""
+            
+            change_class = "positive" if change_1d >= 0 else "negative"
+            change_sign = "+" if change_1d >= 0 else ""
+            
+            html_content += f"""
+                        <tr>
+                            <td><strong>{symbol}</strong></td>
+                            <td>${price:.2f}</td>
+                            <td class="{change_class}">{change_sign}{change_1d:.2f} ({change_sign}{change_1d_pct:.2f}%)</td>
+                            <td>{f'{rsi:.1f}' if rsi else 'N/A'}</td>
+                            <td>{f'${week52_low:.2f}' if week52_low else 'N/A'}</td>
+                            <td>{f'${week52_high:.2f}' if week52_high else 'N/A'}</td>
+                            <td>{f'{rank:.0f}%' if rank else 'N/A'}</td>
+                            <td class="{rating_class}">{rating_text}</td>
+                        </tr>
+            """
+        
+        html_content += """
+                    </tbody>
+                </table>
+                
+                <div class="footer">
+                    <p>This report was generated by Stock Analyzer Pro.</p>
+                    <p>🟣 Excellent (IV Rank ≥75%) | 🟢 Good (≥50%) | 🟡 Moderate (≥25%) | 🔴 Poor (<25%)</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # Create email message
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f"📊 CSP Opportunity Summary - {datetime.now().strftime('%Y-%m-%d')}"
+        msg['From'] = EMAIL_SENDER
+        msg['To'] = EMAIL_RECIPIENT
+        
+        # Attach HTML content
+        msg.attach(MIMEText(html_content, 'html'))
+        
+        # Send email via Gmail SMTP
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.sendmail(EMAIL_SENDER, EMAIL_RECIPIENT, msg.as_string())
+        
+        return {"success": True, "message": f"Email sent to {EMAIL_RECIPIENT}"}
+        
+    except smtplib.SMTPAuthenticationError:
+        raise HTTPException(status_code=401, detail="Email authentication failed. Check credentials.")
+    except Exception as e:
+        print(f"Email error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/scheduled-email")
+@app.get("/api/scheduled-email")  # Allow GET for Cloud Scheduler
+async def scheduled_email_report():
+    """
+    Fetch fresh data for all watchlist tickers and send CSP summary email.
+    This endpoint is designed to be called by Cloud Scheduler.
+    """
+    import json
+    
+    if not EMAIL_PASSWORD:
+        raise HTTPException(status_code=500, detail="Email not configured. Missing EMAIL_PASSWORD.")
+    
+    try:
+        # Load watchlist from config.json
+        config_path = os.path.join(frontend_path, "config.json")
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        tickers = config.get('defaultWatchlist', [])
+        
+        if not tickers:
+            raise HTTPException(status_code=400, detail="No tickers in watchlist")
+        
+        print(f"Scheduled email: Fetching data for {len(tickers)} tickers...")
+        
+        # Fetch fresh stock data for all tickers
+        stocks = []
+        for ticker in tickers:
+            try:
+                data = _analyze_ticker(ticker)
+                stocks.append(data)
+            except Exception as e:
+                print(f"Error analyzing {ticker}: {e}")
+                stocks.append({"symbol": ticker, "error": str(e)})
+        
+        # Fetch CSP metrics for all tickers
+        csp_data = {}
+        for stock in stocks:
+            if stock.get('error') or not stock.get('symbol'):
+                continue
+            try:
+                symbol = stock['symbol']
+                vol_result = calculate_volatility_metrics(symbol)
+                metrics_result = calculate_csp_metrics(symbol)
+                csp_data[symbol] = {**vol_result, **metrics_result}
+            except Exception as e:
+                print(f"Error fetching CSP data for {stock.get('symbol')}: {e}")
+        
+        print(f"Scheduled email: Data fetched, generating email...")
+        
+        # Build and send email (reuse the email generation logic)
+        # Sort stocks by CSP rating (IV/HV rank)
+        def get_rank(stock):
+            symbol = stock.get('symbol', '')
+            vol_data = csp_data.get(symbol, {})
+            iv_rank = vol_data.get('iv_rank')
+            hv_rank = vol_data.get('hv_rank')
+            rank = iv_rank if iv_rank is not None else hv_rank
+            return rank if rank is not None else -1
+        
+        sorted_stocks = sorted(
+            [s for s in stocks if not s.get('error')],
+            key=get_rank,
+            reverse=True
+        )
+        
+        # Build HTML email content
+        html_content = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; background-color: #f5f5f5; padding: 20px; }}
+                .container {{ max-width: 800px; margin: 0 auto; background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
+                h1 {{ color: #1a1a2e; margin-bottom: 8px; }}
+                .subtitle {{ color: #666; font-size: 14px; margin-bottom: 24px; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 16px; }}
+                th {{ background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 12px; text-align: left; font-size: 12px; text-transform: uppercase; }}
+                td {{ padding: 12px; border-bottom: 1px solid #eee; }}
+                tr:hover {{ background-color: #f9f9f9; }}
+                .positive {{ color: #27ae60; font-weight: 600; }}
+                .negative {{ color: #e74c3c; font-weight: 600; }}
+                .excellent {{ color: #9b59b6; font-weight: 600; }}
+                .good {{ color: #27ae60; font-weight: 600; }}
+                .moderate {{ color: #f39c12; font-weight: 600; }}
+                .poor {{ color: #e74c3c; font-weight: 600; }}
+                .footer {{ margin-top: 24px; padding-top: 16px; border-top: 1px solid #eee; color: #999; font-size: 12px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>📊 Daily CSP Opportunity Summary</h1>
+                <p class="subtitle">Scheduled Report - {datetime.now().strftime("%Y-%m-%d %H:%M")} SGT</p>
+                
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Price</th>
+                            <th>1D Change</th>
+                            <th>RSI</th>
+                            <th>52W Low</th>
+                            <th>52W High</th>
+                            <th>IV/HV Rank</th>
+                            <th>CSP Rating</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        """
+        
+        for stock in sorted_stocks:
+            symbol = stock.get('symbol', 'N/A')
+            price = stock.get('price', 0)
+            change_1d = stock.get('change_1d', 0)
+            change_1d_pct = stock.get('change_1d_pct', 0)
+            rsi = stock.get('indicators', {}).get('RSI', None)
+            
+            vol_data = csp_data.get(symbol, {})
+            week52_low = vol_data.get('week52_low')
+            week52_high = vol_data.get('week52_high')
+            iv_rank = vol_data.get('iv_rank')
+            hv_rank = vol_data.get('hv_rank')
+            rank = iv_rank if iv_rank is not None else hv_rank
+            
+            if rank is not None:
+                if rank >= 75:
+                    rating_text, rating_class = "🟣 Excellent", "excellent"
+                elif rank >= 50:
+                    rating_text, rating_class = "🟢 Good", "good"
+                elif rank >= 25:
+                    rating_text, rating_class = "🟡 Moderate", "moderate"
+                else:
+                    rating_text, rating_class = "🔴 Poor", "poor"
+            else:
+                rating_text, rating_class = "N/A", ""
+            
+            change_class = "positive" if change_1d >= 0 else "negative"
+            change_sign = "+" if change_1d >= 0 else ""
+            
+            html_content += f"""
+                        <tr>
+                            <td><strong>{symbol}</strong></td>
+                            <td>${price:.2f}</td>
+                            <td class="{change_class}">{change_sign}{change_1d:.2f} ({change_sign}{change_1d_pct:.2f}%)</td>
+                            <td>{f'{rsi:.1f}' if rsi else 'N/A'}</td>
+                            <td>{f'${week52_low:.2f}' if week52_low else 'N/A'}</td>
+                            <td>{f'${week52_high:.2f}' if week52_high else 'N/A'}</td>
+                            <td>{f'{rank:.0f}%' if rank else 'N/A'}</td>
+                            <td class="{rating_class}">{rating_text}</td>
+                        </tr>
+            """
+        
+        html_content += """
+                    </tbody>
+                </table>
+                
+                <div class="footer">
+                    <p>This is an automated daily report from Stock Analyzer Pro.</p>
+                    <p>🟣 Excellent (IV Rank ≥75%) | 🟢 Good (≥50%) | 🟡 Moderate (≥25%) | 🔴 Poor (<25%)</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # Create and send email
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f"📊 Daily CSP Summary - {datetime.now().strftime('%Y-%m-%d')}"
+        msg['From'] = EMAIL_SENDER
+        msg['To'] = EMAIL_RECIPIENT
+        msg.attach(MIMEText(html_content, 'html'))
+        
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.sendmail(EMAIL_SENDER, EMAIL_RECIPIENT, msg.as_string())
+        
+        print(f"Scheduled email sent successfully to {EMAIL_RECIPIENT}")
+        return {"success": True, "message": f"Scheduled email sent to {EMAIL_RECIPIENT}", "tickers_analyzed": len(sorted_stocks)}
+        
+    except Exception as e:
+        print(f"Scheduled email error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
