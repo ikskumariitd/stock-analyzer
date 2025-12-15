@@ -622,12 +622,14 @@ function CSPSummaryTable({ stocks }) {
     useEffect(() => {
         const fetchAllCSPData = async () => {
             setLoading(true);
-            const results = {};
 
-            for (const stock of stocks) {
-                if (stock.error || !stock.symbol) continue;
+            // Filter valid stocks
+            const validStocks = stocks.filter(stock => !stock.error && stock.symbol);
+
+            // Fetch ALL stocks in parallel (much faster!)
+            const fetchPromises = validStocks.map(async (stock) => {
                 try {
-                    // Fetch both volatility and CSP metrics in parallel
+                    // Fetch both volatility and CSP metrics in parallel for each stock
                     const [volRes, metricsRes] = await Promise.all([
                         fetch(`/api/volatility/${stock.symbol}`),
                         fetch(`/api/csp-metrics/${stock.symbol}`)
@@ -636,11 +638,24 @@ function CSPSummaryTable({ stocks }) {
                     const volData = volRes.ok ? await volRes.json() : {};
                     const metricsData = metricsRes.ok ? await metricsRes.json() : {};
 
-                    results[stock.symbol] = { ...volData, ...metricsData };
+                    return {
+                        symbol: stock.symbol,
+                        data: { ...volData, ...metricsData }
+                    };
                 } catch (e) {
                     console.error(`Failed to fetch CSP data for ${stock.symbol}`);
+                    return { symbol: stock.symbol, data: {} };
                 }
-            }
+            });
+
+            // Wait for all fetches to complete
+            const allResults = await Promise.all(fetchPromises);
+
+            // Convert array to object
+            const results = {};
+            allResults.forEach(({ symbol, data }) => {
+                results[symbol] = data;
+            });
 
             setCspData(results);
             setLoading(false);

@@ -8,6 +8,9 @@ from datetime import datetime
 import os
 import google.generativeai as genai
 from dotenv import load_dotenv
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -473,17 +476,32 @@ async def analyze_stock(ticker: str):
 
 @app.post("/api/analyze-batch")
 async def analyze_batch(request: BatchRequest):
-    results = []
-    for ticker in request.tickers:
+    """
+    Analyze multiple tickers in parallel for improved performance.
+    Uses ThreadPoolExecutor to process tickers concurrently.
+    """
+    def analyze_single_ticker(ticker: str):
+        """Wrapper function for parallel execution."""
         try:
-            data = _analyze_ticker(ticker)
-            results.append(data)
+            return _analyze_ticker(ticker)
         except Exception as e:
             # For batch, we return the error in the object so frontend can show per-card error
-            results.append({
+            return {
                 "symbol": ticker.upper(),
                 "error": str(e)
-            })
+            }
+    
+    # Use ThreadPoolExecutor for parallel processing
+    # Max workers = min(32, number of tickers + 4) for optimal performance
+    max_workers = min(32, len(request.tickers) + 4)
+    
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks and gather results
+        tasks = [loop.run_in_executor(executor, analyze_single_ticker, ticker) 
+                 for ticker in request.tickers]
+        results = await asyncio.gather(*tasks)
+    
     return results
 
 @app.get("/api/history/{ticker}")
@@ -888,28 +906,46 @@ async def scheduled_email_report():
         
         print(f"Scheduled email: Fetching data for {len(tickers)} tickers...")
         
-        # Fetch fresh stock data for all tickers
-        stocks = []
-        for ticker in tickers:
+        # Fetch fresh stock data for all tickers (PARALLEL)
+        def analyze_single_ticker(ticker: str):
             try:
-                data = _analyze_ticker(ticker)
-                stocks.append(data)
+                return _analyze_ticker(ticker)
             except Exception as e:
                 print(f"Error analyzing {ticker}: {e}")
-                stocks.append({"symbol": ticker, "error": str(e)})
+                return {"symbol": ticker, "error": str(e)}
         
-        # Fetch CSP metrics for all tickers
-        csp_data = {}
-        for stock in stocks:
+        max_workers = min(32, len(tickers) + 4)
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            tasks = [loop.run_in_executor(executor, analyze_single_ticker, ticker) 
+                     for ticker in tickers]
+            stocks = await asyncio.gather(*tasks)
+        
+        # Fetch CSP metrics for all tickers (PARALLEL)
+        def fetch_csp_data(stock):
             if stock.get('error') or not stock.get('symbol'):
-                continue
+                return None
             try:
                 symbol = stock['symbol']
                 vol_result = calculate_volatility_metrics(symbol)
                 metrics_result = calculate_csp_metrics(symbol)
-                csp_data[symbol] = {**vol_result, **metrics_result}
+                return (symbol, {**vol_result, **metrics_result})
             except Exception as e:
                 print(f"Error fetching CSP data for {stock.get('symbol')}: {e}")
+                return None
+        
+        valid_stocks = [s for s in stocks if not s.get('error') and s.get('symbol')]
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            csp_tasks = [loop.run_in_executor(executor, fetch_csp_data, stock) 
+                         for stock in valid_stocks]
+            csp_results = await asyncio.gather(*csp_tasks)
+        
+        # Build csp_data dictionary from results
+        csp_data = {}
+        for result in csp_results:
+            if result:
+                symbol, data = result
+                csp_data[symbol] = data
         
         print(f"Scheduled email: Data fetched, generating email...")
         
