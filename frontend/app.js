@@ -1344,6 +1344,8 @@ function StockAnalysis({ data }) {
 
                 <VolatilityCard symbol={data.symbol} />
 
+                <MysticPulseCard symbol={data.symbol} />
+
                 <CSPMetricsCard symbol={data.symbol} />
 
                 <Card title="Key Indicators">
@@ -2251,6 +2253,334 @@ function RSIVisualizer({ value }) {
 }
 
 
+
+
+// ============================================
+// Mystic Pulse v2.0 Indicator Component with Price + Histogram Chart
+// ============================================
+function MysticPulseCard({ symbol }) {
+    const [pulseData, setPulseData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    // Refs for price chart (top)
+    const priceChartContainerRef = React.useRef(null);
+    const priceChartRef = React.useRef(null);
+
+    // Refs for histogram chart (bottom)
+    const histogramContainerRef = React.useRef(null);
+    const histogramChartRef = React.useRef(null);
+
+    useEffect(() => {
+        setLoading(true);
+        setError(null);
+
+        fetch(`/api/mystic-pulse/${symbol}?period=1y`)
+            .then(res => {
+                if (!res.ok) throw new Error('Failed to fetch Mystic Pulse data');
+                return res.json();
+            })
+            .then(data => {
+                setPulseData(data);
+                setLoading(false);
+            })
+            .catch(err => {
+                setError(err.message);
+                setLoading(false);
+            });
+    }, [symbol]);
+
+    // Create charts when data is loaded
+    useEffect(() => {
+        if (!pulseData || !pulseData.data || !priceChartContainerRef.current || !histogramContainerRef.current) return;
+
+        // Clean up existing charts
+        if (priceChartRef.current) {
+            priceChartRef.current.remove();
+            priceChartRef.current = null;
+        }
+        if (histogramChartRef.current) {
+            histogramChartRef.current.remove();
+            histogramChartRef.current = null;
+        }
+
+        // === PRICE CHART (Top) ===
+        const priceChart = LightweightCharts.createChart(priceChartContainerRef.current, {
+            width: priceChartContainerRef.current.clientWidth,
+            height: 200,
+            layout: {
+                background: { type: 'solid', color: 'transparent' },
+                textColor: '#9ca3af',
+            },
+            grid: {
+                vertLines: { color: 'rgba(255, 255, 255, 0.03)' },
+                horzLines: { color: 'rgba(255, 255, 255, 0.03)' },
+            },
+            rightPriceScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+            },
+            timeScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+                timeVisible: true,
+                secondsVisible: false,
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+            },
+        });
+
+        priceChartRef.current = priceChart;
+
+        // Add candlestick series with custom colors based on Mystic Pulse
+        const candleSeries = priceChart.addCandlestickSeries({
+            upColor: '#26a69a',
+            downColor: '#ef5350',
+            borderVisible: false,
+            wickUpColor: '#26a69a',
+            wickDownColor: '#ef5350',
+        });
+
+        // Prepare candlestick data with colors based on Mystic Pulse direction
+        const candleData = pulseData.data.map(item => {
+            const direction = item.dominant_direction;
+            const intensity = direction > 0 ? (item.positive_intensity || 0.5) : (item.negative_intensity || 0.5);
+
+            let upColor, downColor, wickColor;
+            if (direction > 0) {
+                // Bullish - use green shades
+                const g = Math.round(90 + 165 * intensity);
+                const b = Math.round(102 * intensity);
+                upColor = `rgb(0, ${g}, ${b})`;
+                downColor = `rgb(0, ${Math.max(60, g - 50)}, ${Math.max(0, b - 30)})`;
+                wickColor = upColor;
+            } else if (direction < 0) {
+                // Bearish - use red shades
+                const r = Math.round(122 + 133 * intensity);
+                const g = Math.round(26 * intensity);
+                upColor = `rgb(${Math.max(100, r - 50)}, ${g}, ${g})`;
+                downColor = `rgb(${r}, ${g}, ${g})`;
+                wickColor = downColor;
+            } else {
+                // Neutral - gray
+                upColor = '#6B7280';
+                downColor = '#4B5563';
+                wickColor = '#6B7280';
+            }
+
+            return {
+                time: item.date,
+                open: item.open,
+                high: item.high,
+                low: item.low,
+                close: item.close,
+                color: item.close >= item.open ? upColor : downColor,
+                borderColor: item.close >= item.open ? upColor : downColor,
+                wickColor: wickColor,
+            };
+        });
+
+        candleSeries.setData(candleData);
+
+        // === HISTOGRAM CHART (Bottom) ===
+        const histogramChart = LightweightCharts.createChart(histogramContainerRef.current, {
+            width: histogramContainerRef.current.clientWidth,
+            height: 80,
+            layout: {
+                background: { type: 'solid', color: 'transparent' },
+                textColor: '#9ca3af',
+            },
+            grid: {
+                vertLines: { color: 'rgba(255, 255, 255, 0.03)' },
+                horzLines: { color: 'rgba(255, 255, 255, 0.03)' },
+            },
+            rightPriceScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+                scaleMargins: { top: 0.1, bottom: 0.1 },
+            },
+            timeScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+                visible: false, // Hide time scale on histogram (synced with price chart)
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+            },
+        });
+
+        histogramChartRef.current = histogramChart;
+
+        // Add histogram series
+        const histSeries = histogramChart.addHistogramSeries({
+            priceFormat: { type: 'volume' },
+            priceScaleId: '',
+        });
+
+        // Prepare histogram data
+        const histData = pulseData.data.map(item => {
+            const direction = item.dominant_direction;
+            const intensity = direction > 0 ? (item.positive_intensity || 0) : (item.negative_intensity || 0);
+            const value = direction > 0 ? intensity * 20 : (direction < 0 ? -intensity * 20 : 0);
+
+            let color;
+            if (direction > 0) {
+                const g = Math.round(90 + 165 * intensity);
+                const b = Math.round(102 * intensity);
+                color = `rgba(0, ${g}, ${b}, 0.9)`;
+            } else if (direction < 0) {
+                const r = Math.round(122 + 133 * intensity);
+                color = `rgba(${r}, ${Math.round(26 * intensity)}, ${Math.round(26 * intensity)}, 0.9)`;
+            } else {
+                color = 'rgba(107, 114, 128, 0.5)';
+            }
+
+            return { time: item.date, value: value, color: color };
+        });
+
+        histSeries.setData(histData);
+
+        // Sync time scales
+        priceChart.timeScale().fitContent();
+        histogramChart.timeScale().fitContent();
+
+        // Sync visible range
+        priceChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+            if (range && histogramChartRef.current) {
+                histogramChartRef.current.timeScale().setVisibleRange(range);
+            }
+        });
+
+        // Handle resize
+        const handleResize = () => {
+            if (priceChartContainerRef.current && priceChartRef.current) {
+                priceChartRef.current.applyOptions({ width: priceChartContainerRef.current.clientWidth });
+            }
+            if (histogramContainerRef.current && histogramChartRef.current) {
+                histogramChartRef.current.applyOptions({ width: histogramContainerRef.current.clientWidth });
+            }
+        };
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            if (priceChartRef.current) {
+                priceChartRef.current.remove();
+                priceChartRef.current = null;
+            }
+            if (histogramChartRef.current) {
+                histogramChartRef.current.remove();
+                histogramChartRef.current = null;
+            }
+        };
+    }, [pulseData]);
+
+    if (loading) {
+        return (
+            <Card title="🔮 Mystic Pulse v2.0">
+                <div style={{ height: '320px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+                    Analyzing directional momentum...
+                </div>
+            </Card>
+        );
+    }
+
+    if (error || !pulseData || !pulseData.summary) {
+        return (
+            <Card title="🔮 Mystic Pulse v2.0">
+                <div style={{ height: '320px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+                    Indicator unavailable
+                </div>
+            </Card>
+        );
+    }
+
+    const summary = pulseData.summary;
+
+    // Get trend colors
+    const getTrendColor = (trend, strength) => {
+        if (trend === 'bullish') {
+            const intensity = Math.min(strength, 1);
+            return `rgb(${Math.round(0)}, ${Math.round(90 + 165 * intensity)}, ${Math.round(0 + 102 * intensity)})`;
+        } else if (trend === 'bearish') {
+            const intensity = Math.min(strength, 1);
+            return `rgb(${Math.round(122 + 133 * intensity)}, ${Math.round(0 + 26 * intensity)}, ${Math.round(0 + 26 * intensity)})`;
+        }
+        return 'rgb(128, 128, 128)';
+    };
+
+    const trendColor = getTrendColor(summary.trend, summary.strength);
+    const trendEmoji = summary.trend === 'bullish' ? '🟢' : summary.trend === 'bearish' ? '🔴' : '⚪';
+
+    return (
+        <Card title="🔮 Mystic Pulse v2.0">
+            {/* Price Candlestick Chart (Top) */}
+            <div
+                ref={priceChartContainerRef}
+                style={{
+                    width: '100%',
+                    height: '200px',
+                    borderRadius: '8px 8px 0 0',
+                    overflow: 'hidden'
+                }}
+            />
+
+            {/* Histogram Chart (Bottom) */}
+            <div
+                ref={histogramContainerRef}
+                style={{
+                    width: '100%',
+                    height: '80px',
+                    borderRadius: '0 0 8px 8px',
+                    overflow: 'hidden',
+                    borderTop: '1px solid rgba(255,255,255,0.05)'
+                }}
+            />
+
+            {/* Trend Summary Row */}
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0.75rem',
+                marginTop: '0.75rem',
+                background: `linear-gradient(135deg, ${trendColor}22, ${trendColor}11)`,
+                border: `1px solid ${trendColor}44`,
+                borderRadius: '8px'
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '1.5rem' }}>{trendEmoji}</span>
+                    <div>
+                        <div style={{
+                            fontSize: '1rem',
+                            fontWeight: 700,
+                            color: trendColor,
+                            textTransform: 'capitalize'
+                        }}>
+                            {summary.trend}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                            {summary.momentum === 'strengthening' ? '📈' : summary.momentum === 'weakening' ? '📉' : '➡️'} {summary.momentum}
+                        </div>
+                    </div>
+                </div>
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                    <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>+DI</div>
+                        <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#00FF66' }}>{summary.di_plus}</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>-DI</div>
+                        <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#FF1A1A' }}>{summary.di_minus}</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '1.2rem', fontWeight: 700, color: trendColor }}>
+                            {(summary.strength * 100).toFixed(0)}%
+                        </div>
+                        <div style={{ fontSize: '0.6rem', color: 'var(--text-secondary)' }}>Strength</div>
+                    </div>
+                </div>
+            </div>
+        </Card>
+    );
+}
 
 
 function Card({ title, children, style }) {

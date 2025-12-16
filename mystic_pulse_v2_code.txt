@@ -1,0 +1,111 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+//  _______           _______  _______           _______  _       _________ _        _______ 
+// (  ____ \|\     /|(  ____ \(  ____ )|\     /|(  ___  )( \      \__   __/( (    /|(  ___  )
+// | (    \/| )   ( || (    \/| (    )|| )   ( || (   ) || (         ) (   |  \  ( || (   ) |
+// | |      | (___) || (__    | (____)|| |   | || |   | || |         | |   |   \ | || |   | |
+// | |      |  ___  ||  __)   |     __)( (   ) )| |   | || |         | |   | (\ \) || |   | |
+// | |      | (   ) || (      | (\ (    \ \_/ / | |   | || |         | |   | | \   || |   | |
+// | (____/\| )   ( || (____/\| ) \ \__  \   /  | (___) || (____/\___) (___| )  \  || (___) |
+// (_______/|/     \|(_______/|/   \__/   \_/   (_______)(_______/\_______/|/    )_)(_______)
+// © chervolino
+//@version=6
+indicator(title="Mystic Pulse V2.0 [CHE] ", shorttitle="MP2.0[CHE]", overlay=false, max_bars_back=2000, max_lines_count=500, max_labels_count=500)
+
+// ——— SECTION: Constants & Enums
+string GROUP_VISIBILITY = "Visibility"
+string GROUP_SMOOTHING  = "Smoothing"
+string GROUP_VISUAL     = "Visualization"
+string GROUP_COLORS     = "Colors"
+
+// ——— SECTION: Inputs (grouped; tooltips; one-row via inline)
+show_neutral_candle_input = input.bool(defval=false, title="Show neutral candles (fallback)", group=GROUP_VISIBILITY, inline="vis", tooltip="If gradient is off, paint bars by trend color.")
+show_last_candles_input   = input.int(defval=333, title="Show last N shapes", minval=0, step=1, group=GROUP_VISIBILITY, inline="vis", tooltip="Limit for shape markers.")
+
+adx_length_input          = input.int(defval=9, title="ADX smoothing length", minval=1, step=1, group=GROUP_SMOOTHING, inline="smth", tooltip="Length for Wilder smoothing.")
+smoothing_factor_input    = input.int(defval=1, title="OHLC SMA length", minval=1, step=1, group=GROUP_SMOOTHING, inline="smth", tooltip="SMA length for OHLC pre-smoothing.")
+
+is_use_gradient_bars_input       = input.bool(defval=true, title="Gradient barcolor", group=GROUP_VISUAL, inline="tog", tooltip="Enable gradient-based barcolor.")
+is_enable_wick_plotcandle_input  = input.bool(defval=true, title="Wick coloring", group=GROUP_VISUAL, inline="tog", tooltip="Color candle wicks via plotcandle overlay.")
+collect_length_input             = input.int(defval=100, title="Gradient window", minval=5, step=5, group=GROUP_VISUAL, inline="grad", tooltip="Window for local normalization.")
+grad_transp_input                = input.int(defval=0, title="Gradient transparency", minval=0, maxval=90, step=5, group=GROUP_VISUAL, inline="grad", tooltip="Transparency for gradients.")
+contrast_gamma_bars_input        = input.float(defval=0.7, title="Gamma bars/shapes", minval=0.3, maxval=2.0, step=0.05, group=GROUP_VISUAL, inline="gma", tooltip="Gamma for bar/shape intensity.")
+contrast_gamma_plots_input       = input.float(defval=0.8, title="Gamma plots", minval=0.3, maxval=2.0, step=0.05, group=GROUP_VISUAL, inline="gma", tooltip="Gamma for counter plots.")
+wick_transp_input                = input.int(defval=0, title="Wick transparency", minval=0, maxval=90, step=5, group=GROUP_VISUAL, inline="wick", tooltip="Transparency for wick coloring.")
+
+up_dark_color_input = input.color(defval=color.new(#005A00, 0), title="Up dark", group=GROUP_COLORS, inline="up", tooltip="Base up color (dark).")
+up_neon_color_input = input.color(defval=color.new(#00FF66, 0), title="Up neon", group=GROUP_COLORS, inline="up", tooltip="Accent up color (neon).")
+dn_dark_color_input = input.color(defval=color.new(#7A0000, 0), title="Down dark", group=GROUP_COLORS, inline="dn", tooltip="Base down color (dark).")
+dn_neon_color_input = input.color(defval=color.new(#FF1A1A, 0), title="Down neon", group=GROUP_COLORS, inline="dn", tooltip="Accent down color (neon).")
+
+// ——— SECTION: Persistent Vars → Runtime Vars
+var float smoothed_true_range = na
+var float smoothed_dm_plus    = na
+var float smoothed_dm_minus   = na
+var int   positive_count      = 0
+var int   negative_count      = 0
+var int   total_count         = 0
+
+// ——— SECTION: Helpers (pure)
+clamp01(x) => math.max(0.0, math.min(1.0, x))
+gamma_adj(x, g) => math.pow(clamp01(x), g)
+norm_in_window(val, winlen) =>
+    min_v = ta.lowest(val, winlen)
+    max_v = ta.highest(val, winlen)
+    span_v = max_v - min_v
+    span_safe = span_v == 0 ? 1.0 : span_v
+    (val - min_v) / span_safe
+
+// ——— SECTION: Core Calculations
+open_s  = ta.sma(open,  smoothing_factor_input)
+high_s  = ta.sma(high,  smoothing_factor_input)
+low_s   = ta.sma(low,   smoothing_factor_input)
+close_s = ta.sma(close, smoothing_factor_input)
+
+true_range = math.max(math.max(high_s - low_s, math.abs(high_s - nz(close_s[1]))), math.abs(low_s - nz(close_s[1])))
+dm_plus    = (high_s - nz(high_s[1]) > nz(low_s[1]) - low_s) ? math.max(high_s - nz(high_s[1]), 0) : 0
+dm_minus   = (nz(low_s[1]) - low_s > high_s - nz(high_s[1])) ? math.max(nz(low_s[1]) - low_s, 0) : 0
+
+smoothed_true_range := na(smoothed_true_range[1]) ? true_range : (smoothed_true_range[1] - (smoothed_true_range[1] / adx_length_input) + true_range)
+smoothed_dm_plus    := na(smoothed_dm_plus[1])    ? dm_plus     : (smoothed_dm_plus[1]    - (smoothed_dm_plus[1]    / adx_length_input) + dm_plus)
+smoothed_dm_minus   := na(smoothed_dm_minus[1])   ? dm_minus    : (smoothed_dm_minus[1]   - (smoothed_dm_minus[1]   / adx_length_input) + dm_minus)
+
+denom = smoothed_true_range
+di_plus  = (na(denom) or denom == 0) ? na : (smoothed_dm_plus  / denom * 100)
+di_minus = (na(denom) or denom == 0) ? na : (smoothed_dm_minus / denom * 100)
+
+if (not na(di_plus) and not na(di_plus[1]) and di_plus > di_plus[1] and di_plus > di_minus)
+    positive_count += 1
+    negative_count := 0
+if (not na(di_minus) and not na(di_minus[1]) and di_minus > di_minus[1] and di_minus > di_plus)
+    negative_count += 1
+    positive_count := 0
+total_count := positive_count == 0 ? negative_count : positive_count
+
+trend_color = positive_count >= negative_count ? color.green : color.red
+trend_score = positive_count - negative_count
+
+mag_norm       = norm_in_window(math.abs(trend_score), collect_length_input)
+mag_norm_gamma = gamma_adj(mag_norm, contrast_gamma_bars_input)
+raw_bar_color  = trend_score >= 0 ? color.from_gradient(mag_norm_gamma, 0.0, 1.0, up_dark_color_input, up_neon_color_input) : color.from_gradient(mag_norm_gamma, 0.0, 1.0, dn_dark_color_input, dn_neon_color_input)
+bar_grad_color = color.new(raw_bar_color, grad_transp_input)
+
+pos_norm        = norm_in_window(positive_count, collect_length_input)
+pos_norm_gamma  = gamma_adj(pos_norm, contrast_gamma_plots_input)
+pos_grad_base   = color.from_gradient(pos_norm_gamma, 0.0, 1.0, up_dark_color_input, up_neon_color_input)
+pos_grad_color  = color.new(pos_grad_base, grad_transp_input)
+
+neg_norm        = norm_in_window(negative_count, collect_length_input)
+neg_norm_gamma  = gamma_adj(neg_norm, contrast_gamma_plots_input)
+neg_grad_base   = color.from_gradient(neg_norm_gamma, 0.0, 1.0, dn_dark_color_input, dn_neon_color_input)
+neg_grad_color  = color.new(neg_grad_base, grad_transp_input)
+
+wick_color_base = trend_score >= 0 ? pos_grad_base : neg_grad_base
+wick_color      = color.new(wick_color_base, wick_transp_input)
+
+// ——— SECTION: Rendering/UI (GLOBAL ONLY; single-line calls)
+plot(positive_count, title="Positive trend count", color=pos_grad_color, style=plot.style_columns)
+plot(negative_count, title="Negative trend count", color=neg_grad_color, style=plot.style_columns)
+plotshape(show_last_candles_input > 0 ? true : false, title="Gradient marker", style=shape.square, location=location.bottom, color=bar_grad_color, size=size.tiny, show_last=show_last_candles_input)
+barcolor(is_enable_wick_plotcandle_input ? na : (is_use_gradient_bars_input ? bar_grad_color : (show_neutral_candle_input ? trend_color : na)))
+plotcandle(is_enable_wick_plotcandle_input ? open : na, is_enable_wick_plotcandle_input ? high : na, is_enable_wick_plotcandle_input ? low : na, is_enable_wick_plotcandle_input ? close : na, title="Wick coloring (plotcandle)", color=is_enable_wick_plotcandle_input ? wick_color : na, wickcolor=is_enable_wick_plotcandle_input ? wick_color : na, bordercolor=is_enable_wick_plotcandle_input ? wick_color : na, force_overlay=true)
+plot(-5,"",chart.bg_color, editable = false)

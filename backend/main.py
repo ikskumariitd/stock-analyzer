@@ -14,6 +14,7 @@ from functools import partial
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from mystic_pulse import calculate_mystic_pulse, get_mystic_pulse_summary
 
 # Load environment variables
 load_dotenv()
@@ -760,6 +761,100 @@ async def get_csp_metrics(ticker: str):
     except Exception as e:
         print(f"CSP metrics error for {ticker}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/mystic-pulse/{ticker}")
+async def get_mystic_pulse(ticker: str, period: str = "1y", adx_length: int = 9, smoothing_factor: int = 1):
+    """
+    Get Mystic Pulse v2.0 indicator data for a stock.
+    
+    Parameters:
+    - ticker: Stock symbol (e.g., AAPL)
+    - period: History period (default: 1y). Options: 1mo, 3mo, 6mo, 1y, 2y, 3y, 5y
+    - adx_length: ADX smoothing length (default: 9)
+    - smoothing_factor: OHLC SMA pre-smoothing length (default: 1)
+    
+    Returns OHLC data with Mystic Pulse values including:
+    - di_plus, di_minus: Directional Index values
+    - positive_intensity, negative_intensity: Normalized streak intensities (0-1)
+    - dominant_direction: 1 (bullish), -1 (bearish), 0 (neutral)
+    - pulse_color: RGB color string for visualization
+    """
+    import math
+    
+    def sanitize(val):
+        if val is None:
+            return None
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return None
+        return round(val, 4) if isinstance(val, float) else val
+    
+    try:
+        ticker = ticker.upper().strip()
+        cache_key = f"mystic_pulse:{ticker}:{period}:{adx_length}:{smoothing_factor}"
+        
+        # Check cache first
+        cached = cache.get(cache_key)
+        if cached is not None:
+            cached["_cached"] = True
+            return cached
+        
+        # Fetch stock data
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period=period)
+        
+        if hist.empty or len(hist) < 30:
+            raise HTTPException(status_code=400, detail=f"Insufficient data for {ticker}")
+        
+        # Calculate Mystic Pulse
+        pulse_df = calculate_mystic_pulse(
+            hist, 
+            adx_length=adx_length, 
+            smoothing_factor=smoothing_factor
+        )
+        
+        # Prepare response data
+        data_points = []
+        for date, row in pulse_df.iterrows():
+            data_points.append({
+                "date": date.strftime("%Y-%m-%d"),
+                "open": sanitize(row["Open"]),
+                "high": sanitize(row["High"]),
+                "low": sanitize(row["Low"]),
+                "close": sanitize(row["Close"]),
+                "volume": int(row["Volume"]) if not math.isnan(row["Volume"]) else 0,
+                "plus_di": sanitize(row.get("plus_di")),
+                "minus_di": sanitize(row.get("minus_di")),
+                "positive_intensity": sanitize(row.get("positive_intensity")),
+                "negative_intensity": sanitize(row.get("negative_intensity")),
+                "dominant_direction": int(row.get("dominant_direction", 0)),
+                "pulse_color": row.get("pulse_color", "rgb(128,128,128)")
+            })
+        
+        # Get summary
+        summary = get_mystic_pulse_summary(pulse_df)
+        
+        result = {
+            "symbol": ticker,
+            "period": period,
+            "adx_length": adx_length,
+            "smoothing_factor": smoothing_factor,
+            "data": data_points,
+            "summary": summary,
+            "_cached": False
+        }
+        
+        # Cache the result
+        cache.set(cache_key, result.copy())
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Mystic Pulse error for {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/market-news")
 async def get_market_news(tickers: str = ""):
