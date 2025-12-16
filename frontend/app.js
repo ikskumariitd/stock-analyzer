@@ -121,6 +121,7 @@ function App() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [addingStock, setAddingStock] = useState(false);
+    const [loadingStock, setLoadingStock] = useState(null);
 
     const handleSearch = async (query) => {
         setLoading(true);
@@ -167,6 +168,7 @@ function App() {
         }
 
         setAddingStock(true);
+        setLoadingStock(symbol);
         try {
             const response = await fetch('/api/analyze-batch', {
                 method: 'POST',
@@ -193,6 +195,7 @@ function App() {
             console.error('Error adding stock:', err);
         } finally {
             setAddingStock(false);
+            setLoadingStock(null);
         }
     };
 
@@ -221,6 +224,13 @@ function App() {
                 <CacheControl />
             </header>
 
+            <WatchlistTags
+                onAddStock={handleAddStock}
+                analyzedStocks={analyzedStocks}
+                disabled={loading || addingStock}
+                loadingStock={loadingStock}
+            />
+
             <Search
                 onSearch={handleSearch}
                 onAddStock={handleAddStock}
@@ -230,7 +240,7 @@ function App() {
                 analyzedStocks={analyzedStocks}
             />
 
-            <YouTubeStocks />
+            {/* <YouTubeStocks /> - Hidden for now, revisit later */}
 
             {loading && (
                 <div style={{ textAlign: 'center', margin: '2rem' }}>
@@ -250,6 +260,118 @@ function App() {
     );
 }
 
+
+
+// Watchlist tags shown above search - click to add stock to analysis
+function WatchlistTags({ onAddStock, analyzedStocks = [], disabled, loadingStock }) {
+    const [watchlist, setWatchlist] = useState([]);
+    const [hoveredStock, setHoveredStock] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        fetch('/static/config.json')
+            .then(res => res.json())
+            .then(config => {
+                setWatchlist(config.defaultWatchlist || []);
+                setLoading(false);
+            })
+            .catch(() => {
+                setWatchlist(['AAPL', 'NVDA', 'TSLA', 'GOOGL', 'AMZN']);
+                setLoading(false);
+            });
+    }, []);
+
+    if (loading || watchlist.length === 0) {
+        return null;
+    }
+
+    return (
+        <div style={{
+            marginBottom: '1rem',
+            padding: '0.75rem 1rem',
+            background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05))',
+            borderRadius: '12px',
+            border: '1px solid rgba(102, 126, 234, 0.1)'
+        }}>
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '0.5rem'
+            }}>
+                <span style={{
+                    fontSize: '0.8rem',
+                    color: 'var(--text-secondary)',
+                    marginRight: '0.25rem',
+                    fontWeight: 500
+                }}>
+                    📋 Watchlist:
+                </span>
+                {watchlist.map(symbol => {
+                    const isAnalyzed = analyzedStocks.includes(symbol);
+                    const isHovered = hoveredStock === symbol;
+                    const isLoading = loadingStock === symbol;
+
+                    return (
+                        <span
+                            key={symbol}
+                            onMouseEnter={() => !isAnalyzed && !isLoading && setHoveredStock(symbol)}
+                            onMouseLeave={() => setHoveredStock(null)}
+                            onClick={() => !isAnalyzed && !disabled && !isLoading && onAddStock && onAddStock(symbol)}
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                                padding: '0.2rem 0.6rem',
+                                background: isLoading
+                                    ? 'linear-gradient(135deg, rgba(243, 156, 18, 0.2), rgba(241, 196, 15, 0.2))'
+                                    : isAnalyzed
+                                        ? 'rgba(0, 0, 0, 0.05)'
+                                        : isHovered
+                                            ? 'linear-gradient(135deg, rgba(39, 174, 96, 0.2), rgba(46, 204, 113, 0.2))'
+                                            : 'white',
+                                borderRadius: '16px',
+                                fontSize: '0.8rem',
+                                fontWeight: 600,
+                                color: isLoading
+                                    ? '#f39c12'
+                                    : isAnalyzed
+                                        ? '#999'
+                                        : isHovered
+                                            ? '#27ae60'
+                                            : '#667eea',
+                                border: isLoading
+                                    ? '1px solid rgba(243, 156, 18, 0.3)'
+                                    : isAnalyzed
+                                        ? '1px solid rgba(0, 0, 0, 0.1)'
+                                        : isHovered
+                                            ? '1px solid rgba(39, 174, 96, 0.3)'
+                                            : '1px solid rgba(102, 126, 234, 0.2)',
+                                cursor: isAnalyzed || isLoading ? 'default' : 'pointer',
+                                transition: 'all 0.2s ease',
+                                opacity: isAnalyzed ? 0.6 : 1
+                            }}
+                        >
+                            {symbol}
+                            {isLoading && (
+                                <span style={{
+                                    fontSize: '0.7rem',
+                                    animation: 'spin 1s linear infinite'
+                                }}>⏳</span>
+                            )}
+                            {isHovered && !isAnalyzed && !isLoading && (
+                                <span style={{ fontSize: '0.7rem', fontWeight: 700 }}>＋</span>
+                            )}
+                            {isAnalyzed && (
+                                <span style={{ fontSize: '0.65rem' }}>✓</span>
+                            )}
+                        </span>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
 
 
 function MarketNews() {
@@ -754,19 +876,11 @@ function Search({ onSearch, onAddStock, onRemoveStock, disabled, addingStock, an
     const debounceRef = React.useRef(null);
     const inputRef = React.useRef(null);
 
-    // Load watchlist from config.json on mount
+    // No longer auto-populate - watchlist is shown as clickable tags above
     useEffect(() => {
-        fetch('/static/config.json')
-            .then(res => res.json())
-            .then(config => {
-                setInput(config.defaultWatchlist.join(', '));
-                setLoading(false);
-            })
-            .catch(() => {
-                setInput('AAPL, NVDA, TSLA'); // Fallback
-                setLoading(false);
-            });
+        setLoading(false);
     }, []);
+
 
     // Get the current word being typed (after the last comma)
     const getCurrentWord = (text) => {
