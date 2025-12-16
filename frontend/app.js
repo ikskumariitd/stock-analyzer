@@ -196,6 +196,16 @@ function App() {
         }
     };
 
+    // Remove a stock from results
+    const handleRemoveStock = (symbol) => {
+        setData(prevData => {
+            if (prevData && Array.isArray(prevData)) {
+                return prevData.filter(s => s.symbol !== symbol);
+            }
+            return prevData;
+        });
+    };
+
     // Get list of analyzed stock symbols for display
     const analyzedStocks = data && Array.isArray(data)
         ? data.filter(s => !s.error).map(s => s.symbol)
@@ -214,6 +224,7 @@ function App() {
             <Search
                 onSearch={handleSearch}
                 onAddStock={handleAddStock}
+                onRemoveStock={handleRemoveStock}
                 disabled={loading}
                 addingStock={addingStock}
                 analyzedStocks={analyzedStocks}
@@ -733,12 +744,13 @@ function YouTubeStocks() {
     );
 }
 
-function Search({ onSearch, onAddStock, disabled, addingStock, analyzedStocks = [] }) {
+function Search({ onSearch, onAddStock, onRemoveStock, disabled, addingStock, analyzedStocks = [] }) {
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(true);
     const [searchResults, setSearchResults] = useState([]);
     const [showDropdown, setShowDropdown] = useState(false);
     const [searchLoading, setSearchLoading] = useState(false);
+    const [hoveredStock, setHoveredStock] = useState(null);
     const debounceRef = React.useRef(null);
     const inputRef = React.useRef(null);
 
@@ -959,19 +971,36 @@ function Search({ onSearch, onAddStock, disabled, addingStock, analyzedStocks = 
                     {analyzedStocks.map(symbol => (
                         <span
                             key={symbol}
+                            onMouseEnter={() => setHoveredStock(symbol)}
+                            onMouseLeave={() => setHoveredStock(null)}
+                            onClick={() => onRemoveStock && onRemoveStock(symbol)}
                             style={{
                                 display: 'inline-flex',
                                 alignItems: 'center',
+                                gap: '0.35rem',
                                 padding: '0.25rem 0.75rem',
-                                background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15))',
+                                background: hoveredStock === symbol
+                                    ? 'linear-gradient(135deg, rgba(231, 76, 60, 0.2), rgba(192, 57, 43, 0.2))'
+                                    : 'linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15))',
                                 borderRadius: '20px',
                                 fontSize: '0.85rem',
                                 fontWeight: 600,
-                                color: '#667eea',
-                                border: '1px solid rgba(102, 126, 234, 0.2)'
+                                color: hoveredStock === symbol ? '#e74c3c' : '#667eea',
+                                border: hoveredStock === symbol
+                                    ? '1px solid rgba(231, 76, 60, 0.3)'
+                                    : '1px solid rgba(102, 126, 234, 0.2)',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease'
                             }}
                         >
                             {symbol}
+                            {hoveredStock === symbol && (
+                                <span style={{
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    marginLeft: '2px'
+                                }}>✕</span>
+                            )}
                         </span>
                     ))}
                 </div>

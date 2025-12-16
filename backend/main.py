@@ -422,33 +422,73 @@ def calculate_csp_metrics(ticker_symbol: str):
         next_earnings = None
         days_to_earnings = None
         earnings_warning = False
+        today = pd.Timestamp.now().normalize()
         
+        # Method 1: Try earnings_dates
         try:
-            # Try to get earnings dates
             earnings_dates = stock.earnings_dates
             if earnings_dates is not None and not earnings_dates.empty:
-                today = datetime.now()
-                future_dates = earnings_dates[earnings_dates.index > pd.Timestamp(today)]
+                future_dates = earnings_dates[earnings_dates.index >= today]
                 if not future_dates.empty:
                     next_earnings_date = future_dates.index[0]
                     next_earnings = next_earnings_date.strftime("%Y-%m-%d")
-                    days_to_earnings = (next_earnings_date - pd.Timestamp(today)).days
-                    earnings_warning = days_to_earnings <= 30
+                    days_to_earnings = (next_earnings_date - today).days
+                    if days_to_earnings >= 0:
+                        earnings_warning = days_to_earnings <= 30
         except Exception as e:
-            print(f"Earnings data error for {ticker_symbol}: {e}")
-            # Try alternative: calendar
+            print(f"Earnings dates error for {ticker_symbol}: {e}")
+        
+        # Method 2: Try calendar if no earnings date found
+        if next_earnings is None:
             try:
                 cal = stock.calendar
-                if cal is not None and 'Earnings Date' in cal:
-                    earnings_date = cal['Earnings Date']
-                    if earnings_date:
-                        if isinstance(earnings_date, list):
-                            earnings_date = earnings_date[0]
-                        next_earnings = str(earnings_date)[:10]
-                        days_to_earnings = (pd.Timestamp(earnings_date) - pd.Timestamp(datetime.now())).days
+                if cal is not None:
+                    # Check for 'Earnings Date' key
+                    if 'Earnings Date' in cal:
+                        earnings_date = cal['Earnings Date']
+                        if earnings_date:
+                            if isinstance(earnings_date, list):
+                                earnings_date = earnings_date[0] if earnings_date else None
+                            if earnings_date:
+                                earnings_ts = pd.Timestamp(earnings_date)
+                                days_diff = (earnings_ts - today).days
+                                if days_diff >= 0:
+                                    next_earnings = str(earnings_date)[:10]
+                                    days_to_earnings = days_diff
+                                    earnings_warning = days_to_earnings <= 30
+                    # Also check DataFrame format
+                    elif isinstance(cal, pd.DataFrame) and 'Earnings Date' in cal.columns:
+                        ed = cal['Earnings Date'].dropna()
+                        if not ed.empty:
+                            for date_val in ed:
+                                earnings_ts = pd.Timestamp(date_val)
+                                if earnings_ts >= today:
+                                    next_earnings = earnings_ts.strftime("%Y-%m-%d")
+                                    days_to_earnings = (earnings_ts - today).days
+                                    earnings_warning = days_to_earnings <= 30
+                                    break
+            except Exception as e:
+                print(f"Calendar error for {ticker_symbol}: {e}")
+        
+        # Method 3: Check info for earnings-related fields
+        if next_earnings is None:
+            try:
+                # Some stocks have earnings timestamp in info
+                earnings_timestamp = info.get('earningsTimestamp') or info.get('mostRecentQuarter')
+                if earnings_timestamp:
+                    # This is usually a Unix timestamp
+                    if isinstance(earnings_timestamp, (int, float)):
+                        from datetime import datetime as dt
+                        earnings_dt = dt.fromtimestamp(earnings_timestamp)
+                        # Estimate next earnings: quarterly = ~90 days from last
+                        next_est = earnings_dt + timedelta(days=90)
+                        while next_est.date() < dt.now().date():
+                            next_est = next_est + timedelta(days=90)
+                        next_earnings = next_est.strftime("%Y-%m-%d")
+                        days_to_earnings = (next_est.date() - dt.now().date()).days
                         earnings_warning = days_to_earnings <= 30 if days_to_earnings else False
-            except:
-                pass
+            except Exception as e:
+                print(f"Info earnings error for {ticker_symbol}: {e}")
         
         return {
             "symbol": ticker_symbol,
