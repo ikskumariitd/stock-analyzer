@@ -763,6 +763,244 @@ async def get_csp_metrics(ticker: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/search-stocks/{query}")
+async def search_stocks(query: str):
+    """
+    Search for stocks matching the query.
+    Uses yfinance to lookup ticker info.
+    Returns top matches with symbol, name, and exchange.
+    """
+    import re
+    
+    try:
+        query = query.upper().strip()
+        
+        if len(query) < 1:
+            return {"results": []}
+        
+        # Common stock symbols to search against
+        # This is a curated list of popular stocks for quick matching
+        POPULAR_STOCKS = {
+            "AAPL": "Apple Inc.",
+            "MSFT": "Microsoft Corporation",
+            "GOOGL": "Alphabet Inc.",
+            "GOOG": "Alphabet Inc. Class C",
+            "AMZN": "Amazon.com Inc.",
+            "TSLA": "Tesla Inc.",
+            "META": "Meta Platforms Inc.",
+            "NVDA": "NVIDIA Corporation",
+            "AMD": "Advanced Micro Devices",
+            "INTC": "Intel Corporation",
+            "NFLX": "Netflix Inc.",
+            "DIS": "The Walt Disney Company",
+            "PYPL": "PayPal Holdings Inc.",
+            "COIN": "Coinbase Global Inc.",
+            "HOOD": "Robinhood Markets Inc.",
+            "SOFI": "SoFi Technologies Inc.",
+            "PLTR": "Palantir Technologies",
+            "ROKU": "Roku Inc.",
+            "SQ": "Block Inc.",
+            "SHOP": "Shopify Inc.",
+            "SPOT": "Spotify Technology",
+            "UBER": "Uber Technologies",
+            "LYFT": "Lyft Inc.",
+            "SNAP": "Snap Inc.",
+            "PINS": "Pinterest Inc.",
+            "TWTR": "Twitter Inc.",
+            "ZM": "Zoom Video Communications",
+            "DOCU": "DocuSign Inc.",
+            "CRWD": "CrowdStrike Holdings",
+            "DDOG": "Datadog Inc.",
+            "NET": "Cloudflare Inc.",
+            "SNOW": "Snowflake Inc.",
+            "MSTR": "MicroStrategy Inc.",
+            "MARA": "Marathon Digital Holdings",
+            "RIOT": "Riot Platforms Inc.",
+            "SMCI": "Super Micro Computer",
+            "ARM": "Arm Holdings",
+            "DELL": "Dell Technologies",
+            "HPE": "Hewlett Packard Enterprise",
+            "IBM": "IBM Corporation",
+            "ORCL": "Oracle Corporation",
+            "CRM": "Salesforce Inc.",
+            "ADBE": "Adobe Inc.",
+            "NOW": "ServiceNow Inc.",
+            "WDAY": "Workday Inc.",
+            "TEAM": "Atlassian Corporation",
+            "MU": "Micron Technology",
+            "QCOM": "Qualcomm Inc.",
+            "AVGO": "Broadcom Inc.",
+            "TXN": "Texas Instruments",
+            "AMAT": "Applied Materials",
+            "LRCX": "Lam Research",
+            "KLAC": "KLA Corporation",
+            "ASML": "ASML Holding",
+            "TSM": "Taiwan Semiconductor",
+            "BABA": "Alibaba Group",
+            "JD": "JD.com Inc.",
+            "PDD": "PDD Holdings",
+            "BIDU": "Baidu Inc.",
+            "NIO": "NIO Inc.",
+            "XPEV": "XPeng Inc.",
+            "LI": "Li Auto Inc.",
+            "RIVN": "Rivian Automotive",
+            "LCID": "Lucid Group",
+            "F": "Ford Motor Company",
+            "GM": "General Motors",
+            "TM": "Toyota Motor",
+            "BA": "Boeing Company",
+            "LMT": "Lockheed Martin",
+            "RTX": "RTX Corporation",
+            "NOC": "Northrop Grumman",
+            "GD": "General Dynamics",
+            "CAT": "Caterpillar Inc.",
+            "DE": "Deere & Company",
+            "UNP": "Union Pacific",
+            "UPS": "United Parcel Service",
+            "FDX": "FedEx Corporation",
+            "DAL": "Delta Air Lines",
+            "UAL": "United Airlines",
+            "AAL": "American Airlines",
+            "LUV": "Southwest Airlines",
+            "CCL": "Carnival Corporation",
+            "RCL": "Royal Caribbean",
+            "MAR": "Marriott International",
+            "HLT": "Hilton Worldwide",
+            "ABNB": "Airbnb Inc.",
+            "BKNG": "Booking Holdings",
+            "EXPE": "Expedia Group",
+            "JPM": "JPMorgan Chase",
+            "BAC": "Bank of America",
+            "WFC": "Wells Fargo",
+            "C": "Citigroup Inc.",
+            "GS": "Goldman Sachs",
+            "MS": "Morgan Stanley",
+            "SCHW": "Charles Schwab",
+            "BLK": "BlackRock Inc.",
+            "V": "Visa Inc.",
+            "MA": "Mastercard Inc.",
+            "AXP": "American Express",
+            "COF": "Capital One",
+            "DFS": "Discover Financial",
+            "JNJ": "Johnson & Johnson",
+            "PFE": "Pfizer Inc.",
+            "MRK": "Merck & Co.",
+            "ABBV": "AbbVie Inc.",
+            "LLY": "Eli Lilly",
+            "UNH": "UnitedHealth Group",
+            "CVS": "CVS Health",
+            "WBA": "Walgreens Boots Alliance",
+            "WMT": "Walmart Inc.",
+            "TGT": "Target Corporation",
+            "COST": "Costco Wholesale",
+            "HD": "Home Depot",
+            "LOW": "Lowe's Companies",
+            "NKE": "Nike Inc.",
+            "LULU": "Lululemon Athletica",
+            "SBUX": "Starbucks Corporation",
+            "MCD": "McDonald's Corporation",
+            "KO": "Coca-Cola Company",
+            "PEP": "PepsiCo Inc.",
+            "PG": "Procter & Gamble",
+            "CL": "Colgate-Palmolive",
+            "KMB": "Kimberly-Clark",
+            "XOM": "Exxon Mobil",
+            "CVX": "Chevron Corporation",
+            "COP": "ConocoPhillips",
+            "OXY": "Occidental Petroleum",
+            "SLB": "Schlumberger",
+            "HAL": "Halliburton Company",
+            "NEE": "NextEra Energy",
+            "DUK": "Duke Energy",
+            "SO": "Southern Company",
+            "D": "Dominion Energy",
+            "T": "AT&T Inc.",
+            "VZ": "Verizon Communications",
+            "TMUS": "T-Mobile US",
+            "CMCSA": "Comcast Corporation",
+            "CHTR": "Charter Communications",
+            "SPY": "SPDR S&P 500 ETF",
+            "QQQ": "Invesco QQQ Trust",
+            "IWM": "iShares Russell 2000",
+            "DIA": "SPDR Dow Jones",
+            "VOO": "Vanguard S&P 500",
+            "VTI": "Vanguard Total Stock",
+            "ARKK": "ARK Innovation ETF",
+            "GLD": "SPDR Gold Shares",
+            "SLV": "iShares Silver Trust",
+            "USO": "United States Oil Fund",
+            "GDXU": "MicroSectors Gold 3x",
+            "TSLL": "Direxion Tesla Bull 2x",
+            "SOXL": "Direxion Semiconductor Bull 3x",
+            "TQQQ": "ProShares UltraPro QQQ",
+            "SQQQ": "ProShares UltraPro Short QQQ",
+            "UVXY": "ProShares Ultra VIX",
+            "TEM": "Tempus AI Inc.",
+            "BBAI": "BigBear.ai Holdings",
+            "OPEN": "Opendoor Technologies",
+            "APLD": "Applied Digital",
+            "FUTU": "Futu Holdings",
+            "QBTS": "D-Wave Quantum Inc.",
+            "RGTI": "Rigetti Computing",
+            "QUBT": "Quantum Computing Inc.",
+            "IONQ": "IonQ Inc.",
+            "APP": "AppLovin Corporation",
+            "RKLB": "Rocket Lab USA",
+            "AFRM": "Affirm Holdings",
+            "UPST": "Upstart Holdings",
+        }
+        
+        results = []
+        
+        # First, check for exact matches
+        if query in POPULAR_STOCKS:
+            results.append({
+                "symbol": query,
+                "name": POPULAR_STOCKS[query],
+                "exchange": "NASDAQ/NYSE"
+            })
+        
+        # Then find partial matches (symbol starts with query)
+        for symbol, name in POPULAR_STOCKS.items():
+            if symbol != query and symbol.startswith(query):
+                results.append({
+                    "symbol": symbol,
+                    "name": name,
+                    "exchange": "NASDAQ/NYSE"
+                })
+        
+        # Also search by company name
+        query_lower = query.lower()
+        for symbol, name in POPULAR_STOCKS.items():
+            if query_lower in name.lower() and symbol not in [r["symbol"] for r in results]:
+                results.append({
+                    "symbol": symbol,
+                    "name": name,
+                    "exchange": "NASDAQ/NYSE"
+                })
+        
+        # If query looks like a ticker and not in our list, try to validate with yfinance
+        if len(results) == 0 and len(query) <= 5 and query.isalpha():
+            try:
+                stock = yf.Ticker(query)
+                info = stock.info
+                if info and info.get('shortName') or info.get('longName'):
+                    results.append({
+                        "symbol": query,
+                        "name": info.get('shortName') or info.get('longName') or query,
+                        "exchange": info.get('exchange', 'Unknown')
+                    })
+            except:
+                pass
+        
+        # Limit to top 10 results
+        return {"results": results[:10]}
+        
+    except Exception as e:
+        print(f"Stock search error: {e}")
+        return {"results": [], "error": str(e)}
+
+
 @app.get("/api/mystic-pulse/{ticker}")
 async def get_mystic_pulse(ticker: str, period: str = "1y", adx_length: int = 9, smoothing_factor: int = 1):
     """

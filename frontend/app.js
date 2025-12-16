@@ -120,6 +120,7 @@ function App() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [addingStock, setAddingStock] = useState(false);
 
     const handleSearch = async (query) => {
         setLoading(true);
@@ -151,6 +152,55 @@ function App() {
         }
     };
 
+    const handleAddStock = async (symbol) => {
+        // Check if stock already exists in data
+        if (data && Array.isArray(data)) {
+            const exists = data.some(s => s.symbol === symbol);
+            if (exists) {
+                // Stock already in list, just scroll to it
+                const element = document.getElementById(`stock-${symbol}`);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+                return;
+            }
+        }
+
+        setAddingStock(true);
+        try {
+            const response = await fetch('/api/analyze-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tickers: [symbol] })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch stock data');
+            }
+
+            const newStockData = await response.json();
+
+            if (newStockData && newStockData.length > 0) {
+                // Prepend new stock to existing data
+                setData(prevData => {
+                    if (prevData && Array.isArray(prevData)) {
+                        return [newStockData[0], ...prevData];
+                    }
+                    return newStockData;
+                });
+            }
+        } catch (err) {
+            console.error('Error adding stock:', err);
+        } finally {
+            setAddingStock(false);
+        }
+    };
+
+    // Get list of analyzed stock symbols for display
+    const analyzedStocks = data && Array.isArray(data)
+        ? data.filter(s => !s.error).map(s => s.symbol)
+        : [];
+
     return (
         <div className="container">
             <header className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
@@ -161,7 +211,13 @@ function App() {
                 <CacheControl />
             </header>
 
-            <Search onSearch={handleSearch} disabled={loading} />
+            <Search
+                onSearch={handleSearch}
+                onAddStock={handleAddStock}
+                disabled={loading}
+                addingStock={addingStock}
+                analyzedStocks={analyzedStocks}
+            />
 
             <YouTubeStocks />
 
@@ -178,9 +234,12 @@ function App() {
             )}
 
             {data && <Dashboard data={data} />}
+
         </div>
     );
 }
+
+
 
 function MarketNews() {
     const [news, setNews] = useState([]);
@@ -674,9 +733,14 @@ function YouTubeStocks() {
     );
 }
 
-function Search({ onSearch, disabled }) {
+function Search({ onSearch, onAddStock, disabled, addingStock, analyzedStocks = [] }) {
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(true);
+    const [searchResults, setSearchResults] = useState([]);
+    const [showDropdown, setShowDropdown] = useState(false);
+    const [searchLoading, setSearchLoading] = useState(false);
+    const debounceRef = React.useRef(null);
+    const inputRef = React.useRef(null);
 
     // Load watchlist from config.json on mount
     useEffect(() => {
@@ -692,28 +756,375 @@ function Search({ onSearch, disabled }) {
             });
     }, []);
 
+    // Get the current word being typed (after the last comma)
+    const getCurrentWord = (text) => {
+        const parts = text.split(',');
+        return parts[parts.length - 1].trim().toUpperCase();
+    };
+
+    // Search for stocks as user types
+    const searchStocks = async (query) => {
+        if (query.length < 1) {
+            setSearchResults([]);
+            setShowDropdown(false);
+            return;
+        }
+
+        setSearchLoading(true);
+        try {
+            const res = await fetch(`/api/search-stocks/${encodeURIComponent(query)}`);
+            if (res.ok) {
+                const data = await res.json();
+                setSearchResults(data.results || []);
+                setShowDropdown(data.results && data.results.length > 0);
+            }
+        } catch (e) {
+            console.error('Search error:', e);
+            setSearchResults([]);
+        } finally {
+            setSearchLoading(false);
+        }
+    };
+
+    const handleInputChange = (e) => {
+        const value = e.target.value;
+        setInput(value);
+
+        // Get the current word being typed
+        const currentWord = getCurrentWord(value);
+
+        // Debounce search calls
+        if (debounceRef.current) {
+            clearTimeout(debounceRef.current);
+        }
+        debounceRef.current = setTimeout(() => {
+            if (currentWord.length >= 1) {
+                searchStocks(currentWord);
+            } else {
+                setSearchResults([]);
+                setShowDropdown(false);
+            }
+        }, 250);
+    };
+
+    const handleSelect = (stock) => {
+        // Clear dropdown and the partial text typed
+        setSearchResults([]);
+        setShowDropdown(false);
+
+        // Remove the partial word that was being typed
+        const parts = input.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        if (parts.length > 0) {
+            const lastWord = parts[parts.length - 1].toUpperCase();
+            // If the last word looks like a partial match being typed, remove it
+            if (stock.symbol.startsWith(lastWord) || lastWord.length < 4) {
+                parts.pop();
+                setInput(parts.length > 0 ? parts.join(', ') + ', ' : '');
+            }
+        }
+
+        // Immediately fetch and display the stock
+        if (onAddStock) {
+            onAddStock(stock.symbol);
+        }
+
+        // Focus back on input
+        if (inputRef.current) {
+            inputRef.current.focus();
+        }
+    };
+
     const handleSubmit = (e) => {
         e.preventDefault();
+        setShowDropdown(false);
         if (input.trim()) {
-            onSearch(input.trim());
+            // Clean up the input before submitting
+            const tickers = input.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            onSearch(tickers.join(', '));
+            setInput(''); // Clear input after search
+        }
+    };
+
+    const handleBlur = () => {
+        // Delay hiding dropdown to allow click on results
+        setTimeout(() => setShowDropdown(false), 200);
+    };
+
+    const handleFocus = () => {
+        const currentWord = getCurrentWord(input);
+        if (currentWord.length >= 1 && searchResults.length > 0) {
+            setShowDropdown(true);
         }
     };
 
     return (
         <div className="search-container">
-            <form className="search-box" onSubmit={handleSubmit}>
+            <form className="search-box" onSubmit={handleSubmit} style={{ position: 'relative' }}>
                 <input
+                    ref={inputRef}
                     type="text"
                     className="search-input"
-                    placeholder={loading ? "Loading watchlist..." : "Enter Symbols (e.g., AAPL, NVDA)..."}
+                    placeholder={loading ? "Loading watchlist..." : "Type to search stocks (e.g., AAPL, NVDA)..."}
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
+                    onChange={handleInputChange}
+                    onBlur={handleBlur}
+                    onFocus={handleFocus}
                     disabled={disabled || loading}
+                    autoComplete="off"
                 />
+                {searchLoading && (
+                    <span style={{
+                        position: 'absolute',
+                        right: '140px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        fontSize: '0.8rem',
+                        color: '#667eea'
+                    }}>⏳</span>
+                )}
                 <button type="submit" className="search-button" disabled={disabled || loading}>
                     {disabled ? '...' : 'ANALYZE'}
                 </button>
+
+                {showDropdown && searchResults.length > 0 && (
+                    <div style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        marginTop: '4px',
+                        background: 'white',
+                        borderRadius: '12px',
+                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.15)',
+                        border: '1px solid rgba(0, 0, 0, 0.1)',
+                        zIndex: 1000,
+                        maxHeight: '300px',
+                        overflowY: 'auto'
+                    }}>
+                        {searchResults.map((stock, idx) => (
+                            <div
+                                key={stock.symbol}
+                                onClick={() => handleSelect(stock)}
+                                style={{
+                                    padding: '0.75rem 1rem',
+                                    cursor: 'pointer',
+                                    borderBottom: idx < searchResults.length - 1 ? '1px solid rgba(0, 0, 0, 0.05)' : 'none',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.75rem',
+                                    transition: 'background 0.15s ease'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(102, 126, 234, 0.08)'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                            >
+                                <span style={{
+                                    fontWeight: 700,
+                                    color: '#667eea',
+                                    minWidth: '60px'
+                                }}>
+                                    {stock.symbol}
+                                </span>
+                                <span style={{
+                                    color: '#666',
+                                    fontSize: '0.85rem',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                }}>
+                                    {stock.name}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </form>
+
+            {/* Display analyzed stocks as tags */}
+            {analyzedStocks.length > 0 && (
+                <div style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '0.5rem',
+                    marginTop: '0.75rem',
+                    padding: '0 0.25rem'
+                }}>
+                    <span style={{
+                        fontSize: '0.8rem',
+                        color: 'var(--text-secondary)',
+                        alignSelf: 'center',
+                        marginRight: '0.25rem'
+                    }}>
+                        📊 Analyzing:
+                    </span>
+                    {analyzedStocks.map(symbol => (
+                        <span
+                            key={symbol}
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                padding: '0.25rem 0.75rem',
+                                background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15))',
+                                borderRadius: '20px',
+                                fontSize: '0.85rem',
+                                fontWeight: 600,
+                                color: '#667eea',
+                                border: '1px solid rgba(102, 126, 234, 0.2)'
+                            }}
+                        >
+                            {symbol}
+                        </span>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// Quick Add Stock Component with Autocomplete
+function QuickAddStock({ onAddStock, disabled }) {
+    const [query, setQuery] = useState('');
+    const [results, setResults] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [showDropdown, setShowDropdown] = useState(false);
+    const debounceRef = React.useRef(null);
+
+    const searchStocks = async (searchQuery) => {
+        if (searchQuery.length < 1) {
+            setResults([]);
+            setShowDropdown(false);
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const res = await fetch(`/api/search-stocks/${encodeURIComponent(searchQuery)}`);
+            if (res.ok) {
+                const data = await res.json();
+                setResults(data.results || []);
+                setShowDropdown(data.results && data.results.length > 0);
+            }
+        } catch (e) {
+            console.error('Search error:', e);
+            setResults([]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleInputChange = (e) => {
+        const value = e.target.value;
+        setQuery(value);
+
+        // Debounce search calls
+        if (debounceRef.current) {
+            clearTimeout(debounceRef.current);
+        }
+        debounceRef.current = setTimeout(() => {
+            searchStocks(value);
+        }, 300);
+    };
+
+    const handleSelect = (stock) => {
+        setQuery('');
+        setResults([]);
+        setShowDropdown(false);
+        if (onAddStock) {
+            onAddStock(stock.symbol);
+        }
+    };
+
+    const handleBlur = () => {
+        // Delay hiding dropdown to allow click on results
+        setTimeout(() => setShowDropdown(false), 200);
+    };
+
+    return (
+        <div style={{
+            position: 'relative',
+            marginBottom: '1rem',
+            maxWidth: '400px'
+        }}>
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.5rem 1rem',
+                background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1))',
+                borderRadius: '12px',
+                border: '1px solid rgba(102, 126, 234, 0.2)'
+            }}>
+                <span style={{ fontSize: '1.2rem' }}>➕</span>
+                <input
+                    type="text"
+                    value={query}
+                    onChange={handleInputChange}
+                    onFocus={() => query.length > 0 && results.length > 0 && setShowDropdown(true)}
+                    onBlur={handleBlur}
+                    placeholder="Quick add stock..."
+                    disabled={disabled}
+                    style={{
+                        flex: 1,
+                        border: 'none',
+                        background: 'transparent',
+                        fontSize: '0.95rem',
+                        color: 'var(--text-primary)',
+                        outline: 'none'
+                    }}
+                />
+                {loading && <span style={{ fontSize: '0.8rem', color: '#667eea' }}>⏳</span>}
+            </div>
+
+            {showDropdown && results.length > 0 && (
+                <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    marginTop: '4px',
+                    background: 'white',
+                    borderRadius: '12px',
+                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.15)',
+                    border: '1px solid rgba(0, 0, 0, 0.1)',
+                    zIndex: 1000,
+                    maxHeight: '300px',
+                    overflowY: 'auto'
+                }}>
+                    {results.map((stock, idx) => (
+                        <div
+                            key={stock.symbol}
+                            onClick={() => handleSelect(stock)}
+                            style={{
+                                padding: '0.75rem 1rem',
+                                cursor: 'pointer',
+                                borderBottom: idx < results.length - 1 ? '1px solid rgba(0, 0, 0, 0.05)' : 'none',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                transition: 'background 0.15s ease'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(102, 126, 234, 0.08)'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                        >
+                            <span style={{
+                                fontWeight: 700,
+                                color: '#667eea',
+                                minWidth: '60px'
+                            }}>
+                                {stock.symbol}
+                            </span>
+                            <span style={{
+                                color: 'var(--text-secondary)',
+                                fontSize: '0.85rem',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                            }}>
+                                {stock.name}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            )}
         </div>
     );
 }
