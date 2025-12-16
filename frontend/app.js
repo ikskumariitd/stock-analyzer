@@ -1091,11 +1091,19 @@ function CSPSummaryTable({ stocks }) {
                     Analyzing volatility data...
                 </div>
             ) : (
-                <div style={{ overflowX: 'auto' }}>
+                <div style={{
+                    overflowX: 'auto',
+                    WebkitOverflowScrolling: 'touch',
+                    marginLeft: '-0.5rem',
+                    marginRight: '-0.5rem',
+                    paddingLeft: '0.5rem',
+                    paddingRight: '0.5rem'
+                }}>
                     <table style={{
                         width: '100%',
+                        minWidth: '700px',
                         borderCollapse: 'collapse',
-                        fontSize: '0.9rem'
+                        fontSize: '0.85rem'
                     }}>
                         <thead>
                             <tr style={{
@@ -1104,24 +1112,24 @@ function CSPSummaryTable({ stocks }) {
                                 {[
                                     { key: 'symbol', label: 'Symbol' },
                                     { key: 'price', label: 'Price' },
-                                    { key: 'change', label: '1D Change' },
+                                    { key: 'change', label: '1D Chg' },
                                     { key: 'rsi', label: 'RSI' },
-                                    { key: 'low52', label: '52W Low' },
-                                    { key: 'high52', label: '52W High' },
-                                    { key: 'rank', label: 'IV/HV Rank' },
-                                    { key: 'rating', label: 'CSP Rating' }
+                                    { key: 'low52', label: '52L' },
+                                    { key: 'high52', label: '52H' },
+                                    { key: 'rank', label: 'Rank' },
+                                    { key: 'rating', label: 'Rating' }
                                 ].map(({ key, label }) => (
                                     <th
                                         key={key}
                                         onClick={() => handleSort(key)}
                                         style={{
                                             textAlign: 'left',
-                                            padding: '0.75rem 1rem',
+                                            padding: '0.5rem 0.5rem',
                                             color: sortColumn === key ? '#667eea' : '#555',
                                             fontWeight: 600,
-                                            fontSize: '0.8rem',
+                                            fontSize: '0.75rem',
                                             textTransform: 'uppercase',
-                                            letterSpacing: '0.5px',
+                                            letterSpacing: '0.3px',
                                             cursor: 'pointer',
                                             userSelect: 'none',
                                             transition: 'color 0.2s ease',
@@ -1130,9 +1138,9 @@ function CSPSummaryTable({ stocks }) {
                                     >
                                         {label}
                                         <span style={{
-                                            marginLeft: '4px',
+                                            marginLeft: '2px',
                                             opacity: sortColumn === key ? 1 : 0.3,
-                                            fontSize: '0.7rem'
+                                            fontSize: '0.65rem'
                                         }}>
                                             {sortColumn === key
                                                 ? (sortDirection === 'asc' ? '▲' : '▼')
@@ -1180,36 +1188,35 @@ function CSPSummaryTable({ stocks }) {
                                         onMouseLeave={(e) => e.currentTarget.style.background = idx === 0 && rating.text === 'Excellent' ? 'rgba(155, 89, 182, 0.08)' : 'transparent'}
                                     >
                                         <td style={{
-                                            padding: '0.75rem 1rem',
+                                            padding: '0.5rem',
                                             fontWeight: 700,
-                                            fontSize: '1rem',
+                                            fontSize: '0.9rem',
                                             color: '#1a1a2e'
                                         }}>
                                             {stock.symbol}
                                         </td>
                                         <td style={{
-                                            padding: '0.75rem 1rem',
+                                            padding: '0.5rem',
                                             fontWeight: 600,
-                                            color: '#2e7d32'
+                                            color: '#2e7d32',
+                                            whiteSpace: 'nowrap'
                                         }}>
                                             ${stock.price?.toFixed(2) || 'N/A'}
                                         </td>
                                         <td style={{
-                                            padding: '0.75rem 1rem',
+                                            padding: '0.5rem',
                                             fontWeight: 600,
-                                            color: stock.change_1d >= 0 ? '#27ae60' : '#e74c3c'
+                                            color: stock.change_1d >= 0 ? '#27ae60' : '#e74c3c',
+                                            whiteSpace: 'nowrap'
                                         }}>
                                             {stock.change_1d !== null && stock.change_1d !== undefined ? (
                                                 <>
-                                                    {stock.change_1d >= 0 ? '+' : ''}{stock.change_1d.toFixed(2)}
-                                                    <span style={{ fontSize: '0.8rem', marginLeft: '4px', opacity: 0.8 }}>
-                                                        ({stock.change_1d_pct >= 0 ? '+' : ''}{stock.change_1d_pct?.toFixed(2)}%)
-                                                    </span>
+                                                    {stock.change_1d_pct >= 0 ? '+' : ''}{stock.change_1d_pct?.toFixed(1)}%
                                                 </>
                                             ) : 'N/A'}
                                         </td>
                                         <td style={{
-                                            padding: '0.75rem 1rem'
+                                            padding: '0.5rem'
                                         }}>
                                             {(() => {
                                                 const rsi = stock.indicators?.RSI;
@@ -1217,82 +1224,57 @@ function CSPSummaryTable({ stocks }) {
                                                     return <span style={{ color: '#999' }}>N/A</span>;
                                                 }
                                                 let rsiColor = '#666';
-                                                let rsiLabel = '';
-                                                if (rsi > 70) {
-                                                    rsiColor = '#e74c3c';
-                                                    rsiLabel = 'OB';
-                                                } else if (rsi < 30) {
-                                                    rsiColor = '#27ae60';
-                                                    rsiLabel = 'OS';
-                                                }
+                                                if (rsi > 70) rsiColor = '#e74c3c';
+                                                else if (rsi < 30) rsiColor = '#27ae60';
                                                 return (
-                                                    <span style={{
-                                                        fontWeight: 600,
-                                                        color: rsiColor
-                                                    }}>
-                                                        {rsi.toFixed(1)}
-                                                        {rsiLabel && <span style={{ fontSize: '0.7rem', marginLeft: '4px' }}>({rsiLabel})</span>}
+                                                    <span style={{ fontWeight: 600, color: rsiColor }}>
+                                                        {rsi.toFixed(0)}
                                                     </span>
                                                 );
                                             })()}
                                         </td>
                                         <td style={{
-                                            padding: '0.75rem 1rem',
+                                            padding: '0.5rem',
                                             fontWeight: 500,
-                                            color: '#27ae60'
+                                            color: '#27ae60',
+                                            whiteSpace: 'nowrap'
                                         }}>
-                                            {volData?.week52_low ? `$${volData.week52_low.toFixed(2)}` : 'N/A'}
+                                            {volData?.week52_low ? `$${volData.week52_low.toFixed(0)}` : 'N/A'}
                                         </td>
                                         <td style={{
-                                            padding: '0.75rem 1rem',
+                                            padding: '0.5rem',
                                             fontWeight: 500,
-                                            color: '#e74c3c'
+                                            color: '#e74c3c',
+                                            whiteSpace: 'nowrap'
                                         }}>
-                                            {volData?.week52_high ? `$${volData.week52_high.toFixed(2)}` : 'N/A'}
+                                            {volData?.week52_high ? `$${volData.week52_high.toFixed(0)}` : 'N/A'}
                                         </td>
                                         <td style={{
-                                            padding: '0.75rem 1rem'
+                                            padding: '0.5rem',
+                                            whiteSpace: 'nowrap'
                                         }}>
                                             {rank !== null && rank !== undefined ? (
-                                                <div style={{
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '0.5rem'
-                                                }}>
-                                                    <div style={{
-                                                        width: '60px',
-                                                        height: '6px',
-                                                        background: 'rgba(255, 255, 255, 0.1)',
-                                                        borderRadius: '3px',
-                                                        overflow: 'hidden'
-                                                    }}>
-                                                        <div style={{
-                                                            width: `${rank}%`,
-                                                            height: '100%',
-                                                            background: rating.color,
-                                                            borderRadius: '3px'
-                                                        }} />
-                                                    </div>
-                                                    <span style={{ fontWeight: 500 }}>{rank.toFixed(0)}%</span>
-                                                </div>
+                                                <span style={{ fontWeight: 600, color: rating.color }}>
+                                                    {rank.toFixed(0)}%
+                                                </span>
                                             ) : (
                                                 <span style={{ color: 'var(--text-secondary)' }}>N/A</span>
                                             )}
                                         </td>
                                         <td style={{
-                                            padding: '0.75rem 1rem'
+                                            padding: '0.5rem'
                                         }}>
                                             <span style={{
                                                 display: 'inline-flex',
                                                 alignItems: 'center',
-                                                gap: '0.5rem',
-                                                padding: '0.35rem 0.75rem',
-                                                borderRadius: '20px',
+                                                gap: '0.25rem',
+                                                padding: '0.2rem 0.5rem',
+                                                borderRadius: '12px',
                                                 fontWeight: 600,
-                                                fontSize: '0.8rem',
+                                                fontSize: '0.7rem',
                                                 color: rating.color,
                                                 background: `${rating.color}15`,
-                                                border: `1px solid ${rating.color}30`
+                                                whiteSpace: 'nowrap'
                                             }}>
                                                 {rating.icon} {rating.text}
                                             </span>
