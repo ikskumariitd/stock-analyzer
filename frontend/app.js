@@ -154,25 +154,37 @@ class RequestQueue {
 // Create a global queue instance limiting to 3 concurrent requests
 const apiQueue = new RequestQueue(3);
 
-function SP100Page() {
-    const [stocks, setStocks] = useState([]);
-    const [loading, setLoading] = useState(true);
+function SP100Page({ data = [], setData }) {
+    const [stocks, setStocks] = useState(data); // Initialize with passed data
+    const [loading, setLoading] = useState(data.length === 0); // Only load if no data
     const [filter, setFilter] = useState("");
     const [sortConfig, setSortConfig] = useState({ key: 'market_cap', direction: 'desc' });
 
+    // Sync internal state with props when props change (e.g. if parent updates it)
     useEffect(() => {
+        setStocks(data);
+    }, [data]);
+
+    useEffect(() => {
+        // Only fetch if we don't have data
+        if (data.length > 0) {
+            setLoading(false);
+            return;
+        }
+
         setLoading(true);
         fetch('/api/sp100')
             .then(res => res.json())
-            .then(data => {
-                setStocks(data);
+            .then(fetchedData => {
+                setStocks(fetchedData);
+                if (setData) setData(fetchedData); // Persist up to App
                 setLoading(false);
             })
             .catch(err => {
                 console.error("Failed to fetch S&P 100 data", err);
                 setLoading(false);
             });
-    }, []);
+    }, []); // Empty dependency array means this runs on mount. The check inside handles the logic.
 
     const handleSort = (key) => {
         let direction = 'desc';
@@ -295,6 +307,10 @@ function App() {
     const [loadingStock, setLoadingStock] = useState(null);
     const [watchlistVersion, setWatchlistVersion] = useState(0);
     const [watchlist, setWatchlist] = useState([]);
+
+    // Persistent Data States (Lifted up to prevent refetching on navigation)
+    const [sp100Data, setSp100Data] = useState([]);
+    const [cspData, setCspData] = useState({}); // Cache for CSP Summary Table
 
     // Fetch watchlist from API
     const fetchWatchlist = () => {
@@ -565,10 +581,21 @@ function App() {
                         </div>
                     )}
 
-                    {data && <Dashboard data={data} onRefreshStock={handleRefreshStock} refreshingStock={loadingStock} />}
+                    {data && (
+                        <Dashboard
+                            data={data}
+                            onRefreshStock={handleRefreshStock}
+                            refreshingStock={loadingStock}
+                            cspData={cspData}
+                            setCspData={setCspData}
+                        />
+                    )}
                 </>
             ) : (
-                <SP100Page />
+                <SP100Page
+                    data={sp100Data}
+                    setData={setSp100Data}
+                />
             )}
         </div>
     );
@@ -1783,11 +1810,15 @@ function QuickAddStock({ onAddStock, disabled }) {
 }
 
 
-function Dashboard({ data, onRefreshStock, refreshingStock }) {
+function Dashboard({ data, onRefreshStock, refreshingStock, cspData, setCspData }) {
     const stocks = Array.isArray(data) ? data : [data];
     return (
         <div>
-            <CSPSummaryTable stocks={stocks} />
+            <CSPSummaryTable
+                stocks={stocks}
+                cachedData={cspData}
+                setCachedData={setCspData}
+            />
             <div className="stock-grid">
                 {stocks.map((stock, idx) => (
                     <StockAnalysis
@@ -1802,9 +1833,9 @@ function Dashboard({ data, onRefreshStock, refreshingStock }) {
     );
 }
 
-function CSPSummaryTable({ stocks }) {
-    const [cspData, setCspData] = useState({});
-    const [loading, setLoading] = useState(true);
+function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
+    const [cspData, setCspData] = useState(cachedData);
+    const [loading, setLoading] = useState(false);
     const [emailStatus, setEmailStatus] = useState(null);
 
     // Sorting state
@@ -1816,17 +1847,32 @@ function CSPSummaryTable({ stocks }) {
     const [filterRSI, setFilterRSI] = useState('all');
     const [searchTerm, setSearchTerm] = useState('');
 
+    // Sync from cache prop if it updates
     useEffect(() => {
-        const fetchAllCSPData = async () => {
-            setLoading(true);
+        setCspData(cachedData);
+    }, [cachedData]);
 
+    useEffect(() => {
+        const fetchNeededData = async () => {
             // Filter valid stocks
             const validStocks = stocks.filter(stock => !stock.error && stock.symbol);
 
-            // Fetch ALL stocks in parallel (much faster!)
-            const fetchPromises = validStocks.map(async (stock) => {
+            // Identify which stocks are missing from cache
+            const missingStocks = validStocks.filter(stock => !cachedData[stock.symbol]);
+
+            if (missingStocks.length === 0) {
+                // All data is already cached!
+                setLoading(false);
+                return;
+            }
+
+            // Only show loading if we actually need to fetch something
+            setLoading(true);
+
+            // Fetch MISSING stocks in parallel
+            const fetchPromises = missingStocks.map(async (stock) => {
                 try {
-                    // Fetch both volatility and CSP metrics in parallel for each stock
+                    // Fetch both volatility and CSP metrics in parallel
                     const [volRes, metricsRes] = await Promise.all([
                         fetch(`/api/volatility/${stock.symbol}`),
                         fetch(`/api/csp-metrics/${stock.symbol}`)
@@ -1845,23 +1891,34 @@ function CSPSummaryTable({ stocks }) {
                 }
             });
 
-            // Wait for all fetches to complete
-            const allResults = await Promise.all(fetchPromises);
+            // Wait for new fetches
+            const newResults = await Promise.all(fetchPromises);
 
-            // Convert array to object
-            const results = {};
-            allResults.forEach(({ symbol, data }) => {
-                results[symbol] = data;
-            });
+            // Update cache with new data
+            if (setCachedData) {
+                setCachedData(prevCache => {
+                    const newCache = { ...prevCache };
+                    newResults.forEach(({ symbol, data }) => {
+                        newCache[symbol] = data;
+                    });
+                    return newCache;
+                });
+            } else {
+                // Fallback if no cache setter provided (local state only)
+                const newLocalData = { ...cspData };
+                newResults.forEach(({ symbol, data }) => {
+                    newLocalData[symbol] = data;
+                });
+                setCspData(newLocalData);
+            }
 
-            setCspData(results);
             setLoading(false);
         };
 
         if (stocks && stocks.length > 0) {
-            fetchAllCSPData();
+            fetchNeededData();
         }
-    }, [stocks]);
+    }, [stocks]); // Dependency on stocks: if list changes, check if we need new data
 
     // Determine CSP suitability rating
     const getCSPRating = (volData) => {
