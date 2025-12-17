@@ -3001,16 +3001,20 @@ function PriceChart({ symbol }) {
 
         chartRef.current = chart;
 
-        // Handle resize
+        // Handle resize with ResizeObserver
         const handleResize = () => {
             if (chartContainerRef.current) {
                 chart.applyOptions({ width: chartContainerRef.current.clientWidth });
             }
         };
-        window.addEventListener('resize', handleResize);
+
+        const resizeObserver = new ResizeObserver(entries => {
+            window.requestAnimationFrame(() => handleResize());
+        });
+        resizeObserver.observe(chartContainerRef.current);
 
         return () => {
-            window.removeEventListener('resize', handleResize);
+            resizeObserver.disconnect();
             chart.remove();
         };
     }, []);
@@ -3033,6 +3037,7 @@ function PriceChart({ symbol }) {
                 // Remove old series
                 if (seriesRef.current) {
                     chartRef.current.removeSeries(seriesRef.current);
+                    seriesRef.current = null;
                 }
                 // Remove old BB series
                 if (bbUpperRef.current) {
@@ -3597,10 +3602,20 @@ function MysticPulseCard({ symbol }) {
                 histogramChartRef.current.applyOptions({ width: histogramContainerRef.current.clientWidth });
             }
         };
-        window.addEventListener('resize', handleResize);
+
+        const resizeObserver = new ResizeObserver(entries => {
+            // Wrap in requestAnimationFrame to avoid "ResizeObserver loop limit exceeded"
+            window.requestAnimationFrame(() => {
+                handleResize();
+            });
+        });
+
+        if (priceChartContainerRef.current) {
+            resizeObserver.observe(priceChartContainerRef.current);
+        }
 
         return () => {
-            window.removeEventListener('resize', handleResize);
+            resizeObserver.disconnect();
             if (priceChartRef.current) {
                 priceChartRef.current.remove();
                 priceChartRef.current = null;
