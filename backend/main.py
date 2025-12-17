@@ -792,6 +792,12 @@ async def perform_bulk_analysis(tickers: List[str]):
     
     results = []
     
+    import math
+    def sanitize(val):
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return None
+        return val
+    
     # 1. Check cache for all
     tickers_to_fetch = []
     cached_results = {}
@@ -815,6 +821,33 @@ async def perform_bulk_analysis(tickers: List[str]):
         # threads=True is default but explicit is good
         print(f"Fetching fresh data for {len(tickers_to_fetch)} tickers...")
         bulk_hist = yf.download(tickers_to_fetch, period="1y", group_by='ticker', threads=True, progress=False)
+
+        # Bulk fetch metadata (Market Cap) in parallel
+        print("Fetching market caps...")
+        meta_map = {}
+        
+        def fetch_meta(t_symbol):
+            try:
+                # fast_info is generally faster than .info
+                # Access as dictionary, failed keys raise KeyError which we catch
+                stock = yf.Ticker(t_symbol)
+                try:
+                    return t_symbol, stock.fast_info['market_cap']
+                except:
+                    # Fallback to slower .info
+                    return t_symbol, stock.info.get('marketCap')
+            except Exception as e:
+                print(f"Error fetching metadata for {t_symbol}: {e}")
+                return t_symbol, None
+
+        if tickers_to_fetch:
+            loop = asyncio.get_event_loop()
+            # Use higher worker count for I/O bound tasks
+            with ThreadPoolExecutor(max_workers=min(len(tickers_to_fetch), 50)) as executor:
+                tasks = [loop.run_in_executor(executor, fetch_meta, t) for t in tickers_to_fetch]
+                results_meta = await asyncio.gather(*tasks)
+                meta_map = {t: mc for t, mc in results_meta}
+
         
         # Process each ticker
         for t in tickers_to_fetch:
@@ -858,7 +891,8 @@ async def perform_bulk_analysis(tickers: List[str]):
                 final_obj = {
                     "symbol": t,
                     "name": t, # Default to symbol to save API call
-                    "market_cap": None, # Skip
+                    "name": t, # Default to symbol to save API call for full name
+                    "market_cap": sanitize(meta_map.get(t)), # Use fetched market cap
                     "price": indic_data["price"],
                     "change_1d": indic_data["change_1d"],
                     "change_1d_pct": indic_data["change_1d_pct"],
