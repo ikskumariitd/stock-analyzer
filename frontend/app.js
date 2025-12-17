@@ -186,6 +186,22 @@ function SP100Page({ data = [], setData }) {
             });
     }, []); // Empty dependency array means this runs on mount. The check inside handles the logic.
 
+    const handleRefresh = () => {
+        if (loading) return;
+        setLoading(true);
+        fetch('/api/sp100?refresh=true')
+            .then(res => res.json())
+            .then(fetchedData => {
+                setStocks(fetchedData);
+                if (setData) setData(fetchedData); // Persist up to App
+                setLoading(false);
+            })
+            .catch(err => {
+                console.error("Failed to fetch S&P 100 data", err);
+                setLoading(false);
+            });
+    };
+
     const handleSort = (key) => {
         let direction = 'desc';
         if (sortConfig.key === key && sortConfig.direction === 'desc') {
@@ -244,6 +260,36 @@ function SP100Page({ data = [], setData }) {
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
                 />
+                <button
+                    onClick={handleRefresh}
+                    disabled={loading}
+                    style={{
+                        padding: '8px 16px',
+                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                        border: 'none',
+                        borderRadius: '8px',
+                        color: 'white',
+                        fontWeight: '600',
+                        cursor: loading ? 'wait' : 'pointer',
+                        opacity: loading ? 0.7 : 1,
+                        marginLeft: '10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                    }}
+                >
+                    {loading ? (
+                        <>
+                            <span style={{ animation: 'spin 1s linear infinite' }}>⏳</span>
+                            Refreshing...
+                        </>
+                    ) : (
+                        <>
+                            <span>🔄</span>
+                            Refresh Data
+                        </>
+                    )}
+                </button>
             </div>
 
             {loading ? (
@@ -1955,6 +2001,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
 
         switch (column) {
             case 'symbol': return stock.symbol || '';
+            case 'company': return stock.name || '';
             case 'price': return stock.price || 0;
             case 'change': return stock.change_1d_pct || 0;
             case 'rsi': return stock.indicators?.RSI || 0;
@@ -2237,6 +2284,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                             }}>
                                 {[
                                     { key: 'symbol', label: 'Symbol' },
+                                    { key: 'company', label: 'Company' },
                                     { key: 'price', label: 'Price' },
                                     { key: 'change', label: '1D Chg' },
                                     { key: 'rsi', label: 'RSI' },
@@ -2280,7 +2328,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                         <tbody>
                             {filteredAndSortedStocks.length === 0 ? (
                                 <tr>
-                                    <td colSpan="8" style={{
+                                    <td colSpan="9" style={{
                                         textAlign: 'center',
                                         padding: '2rem',
                                         color: 'var(--text-secondary)'
@@ -2320,6 +2368,17 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                             color: '#1a1a2e'
                                         }}>
                                             {stock.symbol}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.5rem',
+                                            fontSize: '0.8rem',
+                                            color: '#555',
+                                            maxWidth: '150px',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap'
+                                        }} title={stock.name}>
+                                            {stock.name || '-'}
                                         </td>
                                         <td style={{
                                             padding: '0.5rem',

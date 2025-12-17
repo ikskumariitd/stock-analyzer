@@ -776,7 +776,7 @@ def _calculate_indicators(hist, ticker: str):
     
     return data
 
-async def perform_bulk_analysis(tickers: List[str]):
+async def perform_bulk_analysis(tickers: List[str], refresh: bool = False):
     """
     Reusable function to perform bulk analysis on a list of tickers.
     returns: List[Dict] results
@@ -804,7 +804,9 @@ async def perform_bulk_analysis(tickers: List[str]):
     
     for t in tickers:
         cache_key = f"stock:{t}"
-        cached = cache.get(cache_key)
+        cached = None
+        if not refresh:
+            cached = cache.get(cache_key)
         if cached:
             cached["_cached"] = True
             cached_results[t] = cached
@@ -1595,6 +1597,7 @@ async def send_email_report(request: EmailRequest):
                     <thead>
                         <tr>
                             <th>Symbol</th>
+                            <th>Company</th>
                             <th>Price</th>
                             <th>1D Change</th>
                             <th>RSI</th>
@@ -1605,6 +1608,7 @@ async def send_email_report(request: EmailRequest):
                         </tr>
                     </thead>
                     <tbody>
+
         """
         
         # Sort stocks by CSP rating (IV/HV rank) - same order as UI
@@ -1653,8 +1657,9 @@ async def send_email_report(request: EmailRequest):
             change_sign = "+" if change_1d >= 0 else ""
             
             html_content += f"""
-                        <tr>
+                <tr>
                             <td><strong>{symbol}</strong></td>
+                            <td style="font-size: 0.9em; color: #555;">{stock.get('name', symbol)}</td>
                             <td>${price:.2f}</td>
                             <td class="{change_class}">{change_sign}{change_1d:.2f} ({change_sign}{change_1d_pct:.2f}%)</td>
                             <td>{f'{rsi:.1f}' if rsi else 'N/A'}</td>
@@ -1811,6 +1816,7 @@ async def scheduled_email_report():
                     <thead>
                         <tr>
                             <th>Symbol</th>
+                            <th>Company</th>
                             <th>Price</th>
                             <th>1D Change</th>
                             <th>RSI</th>
@@ -1855,6 +1861,7 @@ async def scheduled_email_report():
             html_content += f"""
                         <tr>
                             <td><strong>{symbol}</strong></td>
+                            <td style="font-size: 0.9em; color: #555;">{stock.get('name', symbol)}</td>
                             <td>${price:.2f}</td>
                             <td class="{change_class}">{change_sign}{change_1d:.2f} ({change_sign}{change_1d_pct:.2f}%)</td>
                             <td>{f'{rsi:.1f}' if rsi else 'N/A'}</td>
@@ -2194,7 +2201,7 @@ def get_youtube_video_list():
 
 
 @app.get("/api/sp100")
-async def get_sp100_data():
+async def get_sp100_data(refresh: bool = False):
     """Fetch S&P 100 data."""
     # 1. Get Tickers
     tickers = []
@@ -2206,7 +2213,7 @@ async def get_sp100_data():
 
     # 2. Fetch Data in Bulk
     # Use the optimized bulk analysis function
-    return await perform_bulk_analysis(tickers)
+    return await perform_bulk_analysis(tickers, refresh=refresh)
 
 
 if __name__ == "__main__":
