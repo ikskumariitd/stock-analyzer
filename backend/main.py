@@ -629,8 +629,17 @@ def _analyze_ticker(ticker: str):
         except:
             market_cap = None
 
+    # Get Stock Name
+    stock_name = None
+    try:
+        # Prefer short name for table display, fallback to long name
+        stock_name = stock.info.get('shortName') or stock.info.get('longName') 
+    except:
+        stock_name = None
+
     data = {
         "symbol": ticker,
+        "name": sanitize(stock_name),
         "market_cap": sanitize(market_cap),
         "price": sanitize(round(current_price, 2)),
         "change_1d": sanitize(round(change_1d, 2)),

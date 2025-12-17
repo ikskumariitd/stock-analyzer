@@ -244,6 +244,9 @@ function SP100Page() {
                                 <th onClick={() => handleSort('symbol')}>
                                     Symbol {sortConfig.key === 'symbol' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
                                 </th>
+                                <th onClick={() => handleSort('name')}>
+                                    Company {sortConfig.key === 'name' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
+                                </th>
                                 <th onClick={() => handleSort('price')}>
                                     Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
                                 </th>
@@ -265,6 +268,7 @@ function SP100Page() {
                             {sortedStocks.map(stock => (
                                 <tr key={stock.symbol}>
                                     <td style={{ fontWeight: 'bold' }}>{stock.symbol}</td>
+                                    <td style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>{stock.name || '-'}</td>
                                     <td>${stock.price}</td>
                                     <td className={stock.change_1d_pct >= 0 ? 'positive-change' : 'negative-change'}>
                                         {stock.change_1d_pct > 0 ? '+' : ''}{stock.change_1d_pct}%
