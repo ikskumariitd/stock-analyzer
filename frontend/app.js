@@ -191,12 +191,19 @@ function SP100Page() {
             );
         }
 
+        const getValue = (obj, path) => {
+            return path.split('.').reduce((o, i) => (o ? o[i] : null), obj);
+        };
+
         if (sortConfig.key) {
             sortable.sort((a, b) => {
-                if (a[sortConfig.key] < b[sortConfig.key]) {
+                const valA = getValue(a, sortConfig.key);
+                const valB = getValue(b, sortConfig.key);
+
+                if (valA < valB) {
                     return sortConfig.direction === 'asc' ? -1 : 1;
                 }
-                if (a[sortConfig.key] > b[sortConfig.key]) {
+                if (valA > valB) {
                     return sortConfig.direction === 'asc' ? 1 : -1;
                 }
                 return 0;
@@ -246,8 +253,12 @@ function SP100Page() {
                                 <th onClick={() => handleSort('market_cap')}>
                                     Market Cap {sortConfig.key === 'market_cap' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
                                 </th>
-                                <th>RSI</th>
-                                <th>Sentiment</th>
+                                <th onClick={() => handleSort('indicators.RSI')}>
+                                    RSI {sortConfig.key === 'indicators.RSI' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
+                                </th>
+                                <th onClick={() => handleSort('sentiment.mood')}>
+                                    Sentiment {sortConfig.key === 'sentiment.mood' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
