@@ -294,6 +294,39 @@ function App() {
     const [addingStock, setAddingStock] = useState(false);
     const [loadingStock, setLoadingStock] = useState(null);
     const [watchlistVersion, setWatchlistVersion] = useState(0);
+    const [watchlist, setWatchlist] = useState([]);
+
+    // Fetch watchlist from API
+    const fetchWatchlist = () => {
+        fetch('/api/watchlist')
+            .then(res => res.json())
+            .then(data => {
+                setWatchlist(data.watchlist || []);
+            })
+            .catch(() => {
+                // Fallback to static config
+                fetch('/static/config.json')
+                    .then(res => res.json())
+                    .then(config => {
+                        setWatchlist(config.defaultWatchlist || []);
+                    })
+                    .catch(() => {
+                        setWatchlist(['AAPL', 'NVDA', 'TSLA', 'GOOGL', 'AMZN']);
+                    });
+            });
+    };
+
+    // Fetch watchlist on mount
+    useEffect(() => {
+        fetchWatchlist();
+    }, []);
+
+    // Re-fetch watchlist when version changes
+    useEffect(() => {
+        if (watchlistVersion > 0) {
+            fetchWatchlist();
+        }
+    }, [watchlistVersion]);
 
     // Called when a stock is added to watchlist (from Search component)
     const handleWatchlistChange = () => {
@@ -517,6 +550,7 @@ function App() {
                         disabled={loading}
                         addingStock={addingStock}
                         analyzedStocks={analyzedStocks}
+                        watchlist={watchlist}
                     />
 
                     {loading && (
@@ -1287,7 +1321,7 @@ function YouTubeStocks() {
     );
 }
 
-function Search({ onSearch, onAddStock, onRemoveStock, onWatchlistChange, onClearAnalysis, disabled, addingStock, analyzedStocks = [] }) {
+function Search({ onSearch, onAddStock, onRemoveStock, onWatchlistChange, onClearAnalysis, disabled, addingStock, analyzedStocks = [], watchlist = [] }) {
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(true);
     const [searchResults, setSearchResults] = useState([]);
@@ -1391,13 +1425,35 @@ function Search({ onSearch, onAddStock, onRemoveStock, onWatchlistChange, onClea
         }
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setShowDropdown(false);
-        if (input.trim()) {
-            // Clean up the input before submitting
-            const tickers = input.split(',').map(s => s.trim()).filter(s => s.length > 0);
-            onSearch(tickers.join(', '));
+        // Get tickers from input
+        const inputTickers = input.trim()
+            ? input.split(',').map(s => s.trim().toUpperCase()).filter(s => s.length > 0)
+            : [];
+
+        // Add new tickers to watchlist
+        const newTickers = inputTickers.filter(t => !watchlist.includes(t));
+        if (newTickers.length > 0) {
+            try {
+                // Add to backend in parallel
+                await Promise.all(newTickers.map(t =>
+                    fetch(`/api/watchlist/${t}`, { method: 'POST' })
+                ));
+                // Refresh watchlist UI
+                if (onWatchlistChange) {
+                    onWatchlistChange();
+                }
+            } catch (err) {
+                console.error("Failed to auto-add to watchlist:", err);
+            }
+        }
+
+        // Merge with watchlist, removing duplicates
+        const allTickers = [...new Set([...inputTickers, ...watchlist])];
+        if (allTickers.length > 0) {
+            onSearch(allTickers.join(', '));
             setInput(''); // Clear input after search
         }
     };
