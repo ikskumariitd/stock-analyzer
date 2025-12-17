@@ -34,83 +34,11 @@ else:
 # ============================================
 from threading import Lock
 import time as time_module
+from gcs_cache import GCSCache
 
-class TTLCache:
-    """Thread-safe in-memory cache with TTL (Time To Live) support."""
-    
-    def __init__(self, default_ttl: int = 3600):  # 1 hour default
-        self._cache = {}
-        self._lock = Lock()
-        self.default_ttl = default_ttl
-        self._created_at = time_module.time()
-    
-    def get(self, key: str):
-        """Get value if exists and not expired."""
-        with self._lock:
-            if key in self._cache:
-                value, expiry, created = self._cache[key]
-                if time_module.time() < expiry:
-                    return value
-                else:
-                    # Clean up expired entry
-                    del self._cache[key]
-        return None
-    
-    def set(self, key: str, value: any, ttl: int = None):
-        """Set value with TTL."""
-        with self._lock:
-            now = time_module.time()
-            expiry = now + (ttl or self.default_ttl)
-            self._cache[key] = (value, expiry, now)
-    
-    def delete(self, key: str):
-        """Delete a specific key."""
-        with self._lock:
-            if key in self._cache:
-                del self._cache[key]
-                return True
-        return False
-    
-    def clear(self):
-        """Clear entire cache."""
-        with self._lock:
-            count = len(self._cache)
-            self._cache.clear()
-            return count
-    
-    def stats(self):
-        """Get cache statistics."""
-        with self._lock:
-            now = time_module.time()
-            total = len(self._cache)
-            valid = 0
-            oldest_age = 0
-            
-            for key, (_, expiry, created) in self._cache.items():
-                if now < expiry:
-                    valid += 1
-                    age = now - created
-                    if age > oldest_age:
-                        oldest_age = age
-            
-            expired = total - valid
-            return {
-                "total": total,
-                "valid": valid,
-                "expired": expired,
-                "oldest_age_minutes": round(oldest_age / 60, 1),
-                "ttl_hours": self.default_ttl / 3600
-            }
-    
-    def keys(self):
-        """Get all valid cache keys."""
-        with self._lock:
-            now = time_module.time()
-            return [k for k, (_, exp, _) in self._cache.items() if now < exp]
-
-# Initialize global cache with 1 hour TTL
-cache = TTLCache(default_ttl=3600)
-print(f"Cache initialized with TTL: {cache.default_ttl} seconds (1 hour)")
+# Initialize global cache (GCS)
+cache = GCSCache()
+print(f"Cache initialized with bucket: {cache.bucket_name}")
 
 app = FastAPI()
 
@@ -143,13 +71,8 @@ async def get_cache_stats():
     stats = cache.stats()
     return {
         "success": True,
-        "total_entries": stats["total"],
-        "valid_entries": stats["valid"],
-        "expired_entries": stats["expired"],
-        "oldest_age_minutes": stats["oldest_age_minutes"],
-        "ttl_seconds": cache.default_ttl,
-        "ttl_hours": stats["ttl_hours"],
-        "cached_keys": cache.keys()
+        "stats": stats,
+        "backend": "GCS"
     }
 
 @app.post("/api/cache/clear")
@@ -237,11 +160,21 @@ from typing import List, Dict, Any, Optional
 import numpy as np
 from datetime import timedelta
 
-def calculate_volatility_metrics(ticker_symbol: str):
+def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
     """
     Calculate IV Rank and related volatility metrics for CSP strategy.
     Returns dict with current_iv, iv_rank, hv_30, hv_rank, iv_hv_ratio, and recommendation.
     """
+    ticker_symbol = ticker_symbol.upper().strip()
+    cache_key = f"volatility:{ticker_symbol}"
+
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            cached["_cached"] = True
+            created_ts = cache.get_created_timestamp(cache_key)
+            cached["_cache_age_minutes"] = round((time_module.time() - created_ts) / 60, 1) if created_ts else 0
+            return cached
     import math
     
     def sanitize(val):
@@ -327,7 +260,7 @@ def calculate_volatility_metrics(ticker_symbol: str):
         # Generate recommendation
         recommendation = generate_csp_recommendation(current_iv, iv_rank, hv_rank, iv_hv_ratio)
         
-        return {
+        result = {
             "symbol": ticker_symbol,
             "current_price": sanitize(current_price),
             "current_iv": sanitize(current_iv),
@@ -339,6 +272,12 @@ def calculate_volatility_metrics(ticker_symbol: str):
             "iv_hv_ratio": sanitize(iv_hv_ratio),
             "recommendation": recommendation
         }
+
+        if use_cache and "error" not in result:
+             result["_cached"] = False
+             cache.set(cache_key, result.copy())
+        
+        return result
         
     except Exception as e:
         print(f"Volatility calculation error for {ticker_symbol}: {e}")
@@ -373,10 +312,20 @@ def generate_csp_recommendation(current_iv, iv_rank, hv_rank, iv_hv_ratio):
         return f"🔴 Poor for CSP - Low IV ({rank:.0f}%). {ratio_text}Premium is thin."
 
 
-def calculate_csp_metrics(ticker_symbol: str):
+def calculate_csp_metrics(ticker_symbol: str, use_cache: bool = True):
     """
     Calculate CSP-specific metrics: 52-week range, ATR, support/resistance, earnings.
     """
+    ticker_symbol = ticker_symbol.upper().strip()
+    cache_key = f"csp:{ticker_symbol}"
+
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached is not None:
+             cached["_cached"] = True
+             created_ts = cache.get_created_timestamp(cache_key)
+             cached["_cache_age_minutes"] = round((time_module.time() - created_ts) / 60, 1) if created_ts else 0
+             return cached
     import math
     
     def sanitize(val):
@@ -535,7 +484,7 @@ def calculate_csp_metrics(ticker_symbol: str):
             except Exception as e:
                 print(f"Info earnings error for {ticker_symbol}: {e}")
         
-        return {
+        result = {
             "symbol": ticker_symbol,
             "current_price": sanitize(current_price),
             
@@ -559,6 +508,12 @@ def calculate_csp_metrics(ticker_symbol: str):
             "days_to_earnings": days_to_earnings,
             "earnings_warning": earnings_warning
         }
+
+        if use_cache and "error" not in result:
+             result["_cached"] = False
+             cache.set(cache_key, result.copy())
+             
+        return result
         
     except Exception as e:
         print(f"CSP metrics error for {ticker_symbol}: {e}")
@@ -567,6 +522,7 @@ def calculate_csp_metrics(ticker_symbol: str):
 
 class BatchRequest(BaseModel):
     tickers: List[str]
+    refresh: bool = False
 
 def _analyze_ticker(ticker: str):
     ticker = ticker.upper().strip()
@@ -684,19 +640,26 @@ def _analyze_ticker(ticker: str):
     
     return data
 
-def _analyze_ticker_cached(ticker: str):
+def _analyze_ticker_cached(ticker: str, use_cache: bool = True):
     """Analyze ticker with caching support."""
     ticker = ticker.upper().strip()
     cache_key = f"stock:{ticker}"
     
     # Check cache first
-    cached = cache.get(cache_key)
+    cached = None
+    if use_cache:
+        cached = cache.get(cache_key)
     if cached is not None:
         # Return cached data with cache indicator
         cached["_cached"] = True
-        cached["_cache_age_minutes"] = round(
-            (time_module.time() - cache._cache.get(cache_key, (None, None, time_module.time()))[2]) / 60, 1
-        )
+        
+        # Helper to calculate age from timestamp
+        created_ts = cache.get_created_timestamp(cache_key)
+        age_min = 0
+        if created_ts:
+             age_min = round((time_module.time() - created_ts) / 60, 1)
+
+        cached["_cache_age_minutes"] = age_min
         return cached
     
     # Fetch fresh data
@@ -719,36 +682,264 @@ async def analyze_stock(ticker: str):
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+def _calculate_indicators(hist, ticker: str):
+    """
+    Calculate technical indicators for a given history DataFrame.
+    Returns dictionary with indicators and price data.
+    """
+    import math
+    
+    if hist.empty:
+        return None
+        
+    current_price = hist['Close'].iloc[-1]
+    
+    # Calculate 1-day change
+    if len(hist) >= 2:
+        previous_close = hist['Close'].iloc[-2]
+        change_1d = current_price - previous_close
+        change_1d_pct = (change_1d / previous_close) * 100
+    else:
+        previous_close = current_price
+        change_1d = 0
+        change_1d_pct = 0
+    
+    # Calculate Indicators
+    # RSI
+    hist['RSI'] = ta.rsi(hist['Close'], length=14)
+    
+    # Bollinger Bands
+    bbands = ta.bbands(hist['Close'], length=20)
+    if bbands is not None:
+        # We'll dynamically find them to be safe
+        bb_cols = [c for c in bbands.columns]
+        # pandas_ta usually names them BBL_20_2.0, BBM_20_2.0, BBU_20_2.0
+        bb_upper_col = next((c for c in bb_cols if c.startswith('BBU')), None)
+        bb_lower_col = next((c for c in bb_cols if c.startswith('BBL')), None)
+        
+        bb_upper = bbands[bb_upper_col].iloc[-1] if bb_upper_col else 0
+        bb_lower = bbands[bb_lower_col].iloc[-1] if bb_lower_col else 0
+    else:
+        bb_upper = 0
+        bb_lower = 0
+
+    # SMAs
+    hist['SMA_5'] = ta.sma(hist['Close'], length=5)
+    hist['SMA_50'] = ta.sma(hist['Close'], length=50)
+    hist['SMA_200'] = ta.sma(hist['Close'], length=200)
+
+    # Sanitize inputs for JSON (replace NaN with None)
+    def sanitize(val):
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return None
+        return val
+
+    # Helper for safe access
+    def get_last(series):
+        if series is None or series.empty: return None
+        val = series.iloc[-1]
+        return sanitize(val)
+
+    data = {
+        "price": sanitize(round(current_price, 2)),
+        "change_1d": sanitize(round(change_1d, 2)),
+        "change_1d_pct": sanitize(round(change_1d_pct, 2)),
+        "indicators": {
+            "RSI": sanitize(round(get_last(hist['RSI']), 2)),
+            "BB_Upper": sanitize(round(bb_upper, 2)),
+            "BB_Lower": sanitize(round(bb_lower, 2)),
+            "SMA_5": sanitize(round(get_last(hist['SMA_5']), 2)),
+            "SMA_50": sanitize(round(get_last(hist['SMA_50']), 2)),
+            "SMA_200": sanitize(round(get_last(hist['SMA_200']), 2))
+        }
+    }
+    
+    # Brief summary generation based on indicators
+    rsi_val = data['indicators']['RSI']
+    sma_200_val = data['indicators']['SMA_200']
+    
+    rsi_desc = "neutral"
+    if rsi_val is not None:
+        if rsi_val > 70: rsi_desc = "overbought"
+        elif rsi_val < 30: rsi_desc = "oversold"
+        
+    sma_desc = "unknown"
+    if sma_200_val is not None and current_price:
+         sma_desc = "above" if current_price > sma_200_val else "below"
+
+    summary_lines = [
+        f"The current price of {ticker} is ${data['price']}.",
+        f"RSI is at {rsi_val}, which indicates the stock is {rsi_desc}.",
+        f"The stock is trading {sma_desc} its 200-day moving average."
+    ]
+    data["summary"] = " ".join(summary_lines)
+    
+    return data
+
+async def perform_bulk_analysis(tickers: List[str]):
+    """
+    Reusable function to perform bulk analysis on a list of tickers.
+    returns: List[Dict] results
+    """
+    if not tickers:
+        return []
+    
+    # Ensure tickers are unique and clean
+    tickers = list(set([t.upper().strip() for t in tickers if t.strip()]))
+    
+    print(f"Starting bulk analysis for {len(tickers)} tickers...")
+    start_time = time_module.time()
+    
+    results = []
+    
+    # 1. Check cache for all
+    tickers_to_fetch = []
+    cached_results = {}
+    
+    for t in tickers:
+        cache_key = f"stock:{t}"
+        cached = cache.get(cache_key)
+        if cached:
+            cached["_cached"] = True
+            cached_results[t] = cached
+        else:
+            tickers_to_fetch.append(t)
+    
+    if not tickers_to_fetch:
+        print(f"All {len(tickers)} tickers found in cache.")
+        return [cached_results[t] for t in tickers if t in cached_results]
+
+    # 2. Bulk download history
+    try:
+        # group_by='ticker' gives MultiIndex columns: (Ticker, PriceType)
+        # threads=True is default but explicit is good
+        print(f"Fetching fresh data for {len(tickers_to_fetch)} tickers...")
+        bulk_hist = yf.download(tickers_to_fetch, period="1y", group_by='ticker', threads=True, progress=False)
+        
+        # Process each ticker
+        for t in tickers_to_fetch:
+            try:
+                # Extract history for this ticker
+                # If only 1 ticker fetched, yfinance might not return MultiIndex columns if group_by not forced properly
+                # But with group_by='ticker', it usually does.
+                # Handle case where download failed or no data
+                t_hist = pd.DataFrame()
+                
+                if len(tickers_to_fetch) == 1:
+                    # yf.download behavior varies slightly if list has 1 item vs multiple
+                    if isinstance(bulk_hist.columns, pd.MultiIndex):
+                            if t in bulk_hist.columns.levels[0]:
+                                t_hist = bulk_hist[t]
+                    else:
+                            t_hist = bulk_hist # Should be just the DF
+                else:
+                    if t in bulk_hist.columns.levels[0]:
+                            t_hist = bulk_hist[t]
+                    
+                # Clean empty rows
+                if not t_hist.empty:
+                    t_hist = t_hist.dropna(how='all')
+                
+                if t_hist.empty:
+                    results.append({"symbol": t, "error": "No price data"})
+                    continue
+                    
+                # Calculate indicators
+                indic_data = _calculate_indicators(t_hist, t)
+                
+                if not indic_data:
+                    results.append({"symbol": t, "error": "Calculation error"})
+                    continue
+                    
+                # Construct final object
+                # For bulk, we skip expensive calls (Info, Sentiment)
+                # Use defaults or fast lookups
+                
+                final_obj = {
+                    "symbol": t,
+                    "name": t, # Default to symbol to save API call
+                    "market_cap": None, # Skip
+                    "price": indic_data["price"],
+                    "change_1d": indic_data["change_1d"],
+                    "change_1d_pct": indic_data["change_1d_pct"],
+                    "indicators": indic_data["indicators"],
+                    "sentiment": {
+                        "mood": "Neutral",
+                        "description": "Sentiment analysis skipped for bulk search."
+                    },
+                    "summary": indic_data["summary"],
+                    "_cached": False,
+                    "_cache_age_minutes": 0,
+                    "_is_bulk": True # Flag for frontend if needed
+                }
+                
+                # Cache it
+                cache.set(f"stock:{t}", final_obj)
+                results.append(final_obj)
+                
+            except Exception as e:
+                print(f"Error processing {t} in bulk: {e}")
+                results.append({"symbol": t, "error": str(e)})
+
+    except Exception as e:
+            print(f"Bulk download failed: {e}")
+            return [{"symbol": t, "error": "Bulk fetch failed"} for t in tickers]
+
+    # Combine cached and new
+    final_results = []
+    
+    # Store results in a dict for O(1) lookup
+    new_results_map = {r['symbol']: r for r in results if 'symbol' in r}
+    
+    for t in tickers:
+        if t in cached_results:
+            final_results.append(cached_results[t])
+        elif t in new_results_map:
+            final_results.append(new_results_map[t])
+        else:
+            final_results.append({"symbol": t, "error": "Processing failed"})
+                
+    print(f"Bulk analysis finished in {time_module.time() - start_time:.2f}s")
+    return final_results
+
+
 @app.post("/api/analyze-batch")
 async def analyze_batch(request: BatchRequest):
     """
-    Analyze multiple tickers in parallel for improved performance.
-    Uses ThreadPoolExecutor to process tickers concurrently.
-    Uses caching to speed up repeated requests.
+    Analyze multiple tickers.
+    Optimized for bulk: >10 tickers (uses yf.download mechanics).
     """
-    def analyze_single_ticker(ticker: str):
-        """Wrapper function for parallel execution with caching."""
-        try:
-            return _analyze_ticker_cached(ticker)
-        except Exception as e:
-            # For batch, we return the error in the object so frontend can show per-card error
-            return {
-                "symbol": ticker.upper(),
-                "error": str(e)
-            }
+    tickers = [t.upper().strip() for t in request.tickers if t.strip()]
+    refresh = request.refresh
     
-    # Use ThreadPoolExecutor for parallel processing
-    # Max workers = min(32, number of tickers + 4) for optimal performance
-    max_workers = min(32, len(request.tickers) + 4)
-    
-    loop = asyncio.get_event_loop()
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all tasks and gather results
-        tasks = [loop.run_in_executor(executor, analyze_single_ticker, ticker) 
-                 for ticker in request.tickers]
-        results = await asyncio.gather(*tasks)
-    
-    return results
+    if not tickers:
+        return []
+
+    # --- BULK MODE (>10 tickers) ---
+    if len(tickers) > 10:
+        return await perform_bulk_analysis(tickers)
+
+    # --- LEGACY/DETAILED MODE (<=10 tickers) ---
+    else:
+        def analyze_single_ticker(ticker: str):
+            """Wrapper function for parallel execution with caching."""
+            try:
+                # Pass refresh flag as use_cache argument (refresh=True -> use_cache=False)
+                return _analyze_ticker_cached(ticker, use_cache=not refresh)
+            except Exception as e:
+                return {
+                    "symbol": ticker.upper(),
+                    "error": str(e)
+                }
+        
+        max_workers = min(32, len(tickers) + 4)
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            tasks = [loop.run_in_executor(executor, analyze_single_ticker, ticker) 
+                     for ticker in tickers]
+            results = await asyncio.gather(*tasks)
+        
+        return results
 
 @app.get("/api/history/{ticker}")
 async def get_history(ticker: str, period: str = "3y", include_bb: bool = True):
@@ -811,24 +1002,11 @@ async def get_history(ticker: str, period: str = "3y", include_bb: bool = True):
 async def get_volatility(ticker: str):
     """Get volatility metrics for CSP strategy including IV Rank, HV, and recommendation."""
     try:
-        ticker = ticker.upper().strip()
-        cache_key = f"volatility:{ticker}"
-        
-        # Check cache first
-        cached = cache.get(cache_key)
-        if cached is not None:
-            cached["_cached"] = True
-            return cached
-        
-        # Fetch fresh data
+        # Check cache inside the function now
         result = calculate_volatility_metrics(ticker)
         
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
-        
-        # Cache successful results
-        result["_cached"] = False
-        cache.set(cache_key, result.copy())
         
         return result
     except HTTPException:
@@ -841,24 +1019,11 @@ async def get_volatility(ticker: str):
 async def get_csp_metrics(ticker: str):
     """Get CSP-specific metrics: 52-week range, ATR, support/resistance, earnings calendar."""
     try:
-        ticker = ticker.upper().strip()
-        cache_key = f"csp:{ticker}"
-        
-        # Check cache first
-        cached = cache.get(cache_key)
-        if cached is not None:
-            cached["_cached"] = True
-            return cached
-        
-        # Fetch fresh data
+        # Check cache inside the function now
         result = calculate_csp_metrics(ticker)
         
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
-        
-        # Cache successful results
-        result["_cached"] = False
-        cache.set(cache_key, result.copy())
         
         return result
     except HTTPException:
@@ -1230,10 +1395,27 @@ async def get_market_news(tickers: str = ""):
         # Remove duplicates while preserving order
         unique_tickers = list(dict.fromkeys(market_tickers))
         
+        # Parallel fetch for news
+        def fetch_ticker_news(t_symbol):
+            try:
+                stock_obj = yf.Ticker(t_symbol)
+                return stock_obj.news
+            except:
+                return []
+
+        news_results = {}
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_ticker = {executor.submit(fetch_ticker_news, t): t for t in unique_tickers}
+            for future in future_to_ticker:
+                t_sym = future_to_ticker[future]
+                try:
+                    news_results[t_sym] = future.result()
+                except:
+                    news_results[t_sym] = []
+        
         for ticker_symbol in unique_tickers:
             try:
-                stock = yf.Ticker(ticker_symbol)
-                news = stock.news
+                news = news_results.get(ticker_symbol, [])
                 
                 if news:
                     for article in news[:5]:  # Get top 5 per ticker
@@ -1516,22 +1698,11 @@ async def scheduled_email_report():
         
         print(f"Scheduled email: Fetching data for {len(tickers)} tickers...")
         
-        # Fetch fresh stock data for all tickers (PARALLEL)
-        def analyze_single_ticker(ticker: str):
-            try:
-                return _analyze_ticker(ticker)
-            except Exception as e:
-                print(f"Error analyzing {ticker}: {e}")
-                return {"symbol": ticker, "error": str(e)}
-        
-        max_workers = min(32, len(tickers) + 4)
-        loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            tasks = [loop.run_in_executor(executor, analyze_single_ticker, ticker) 
-                     for ticker in tickers]
-            stocks = await asyncio.gather(*tasks)
+        # Fetch fresh stock data for all tickers (BULK OPTIMIZED)
+        stocks = await perform_bulk_analysis(tickers)
         
         # Fetch CSP metrics for all tickers (PARALLEL)
+        # We need options data which is not bulk-fetchable yet via yfinance standard
         def fetch_csp_data(stock):
             if stock.get('error') or not stock.get('symbol'):
                 return None
@@ -1994,47 +2165,17 @@ async def get_sp100_data():
     # 1. Get Tickers
     tickers = []
     try:
-        # Try fetching from Wikipedia
-        tables = pd.read_html('https://en.wikipedia.org/wiki/S%26P_100')
-        # Usually the first table
-        df = tables[2] # Table 2 is usually the components list (historically, check if 0 or 2)
-        # Wikipedia structure changes. fallback is safer.
-        # Let's try table 0 first as it's most common for "Components"
-        # Actually, let's just use the static list for reliability and speed as requested by "fetch 100 stocks"
-        # and simple "add to application". Wikipedia scraping is flaky.
         tickers = SP100_TICKERS
     except Exception as e:
         print(f"Error fetching S&P 100 list: {e}")
         tickers = SP100_TICKERS
 
-    # 2. Fetch Data in Parallel
-    # Use ThreadPoolExecutor for parallel processing
-    max_workers = min(32, len(tickers) + 4)
-    
-    loop = asyncio.get_event_loop()
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Use _analyze_ticker_cached to leverage existing cache
-        tasks = [loop.run_in_executor(executor, _analyze_ticker_cached, ticker) 
-                 for ticker in tickers]
-        # Return results, ignoring errors or including them
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    # Filter out exceptions if any
-    final_results = []
-    for res in results:
-        if isinstance(res, dict) and "error" not in res:
-            final_results.append(res)
-        elif isinstance(res, dict) and "error" in res:
-             # Include error items so frontend knows? Or skip? 
-             # Let's skip valid errors but maybe log
-             final_results.append(res)
-        elif isinstance(res, Exception):
-            print(f"Error processing stock: {res}")
-            
-    return final_results
+    # 2. Fetch Data in Bulk
+    # Use the optimized bulk analysis function
+    return await perform_bulk_analysis(tickers)
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
 

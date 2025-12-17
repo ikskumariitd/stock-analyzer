@@ -1,4 +1,4 @@
-# Use Python 3.12 slim image (required for newer pandas_ta versions)
+# Use Python 3.12 slim image
 FROM python:3.12-slim
 
 # Set working directory
@@ -27,12 +27,11 @@ RUN python -m textblob.download_corpora
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 
-# Set working directory to backend
-WORKDIR /app/backend
-
 # Expose port (Cloud Run uses PORT env variable)
 EXPOSE 8080
 
 # Run the application
 # Cloud Run sets PORT environment variable, default to 8080
+# Set WORKDIR to backend so imports like 'from sp100_tickers' work
+WORKDIR /app/backend
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]

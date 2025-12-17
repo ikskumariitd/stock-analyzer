@@ -466,7 +466,7 @@ function App() {
             const response = await fetch('/api/analyze-batch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tickers: [symbol] })
+                body: JSON.stringify({ tickers: [symbol], refresh: true })
             });
 
             if (!response.ok) {

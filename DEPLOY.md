@@ -40,7 +40,18 @@ gcloud config set run/region us-central1
 
 ## Deploy to Cloud Run
 
-### Option A: Direct Deploy (Easiest)
+### Deployment Configuration (Saved)
+- **Project ID**: `stock-analyzer-ik2024`
+- **Region**: `us-central1`
+- **Service Name**: `stock-analyzer`
+
+### Option A: Quick Deploy Script
+Run the included script:
+```cmd
+.\deploy.bat
+```
+
+### Option B: Manual Command (Direct Deploy)
 This builds and deploys in one command:
 
 ```bash
