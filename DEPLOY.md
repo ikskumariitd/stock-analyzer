@@ -114,6 +114,43 @@ Cloud Run Free Tier includes:
 
 ---
 
+## Persistent Watchlist Setup (Optional)
+
+By default, the watchlist is read-only from `config.json`. To enable add/remove from UI:
+
+### Create a GCS Bucket
+
+```bash
+# Create bucket (use your project ID)
+gsutil mb gs://YOUR_PROJECT_ID-watchlist
+
+# Allow Cloud Run service account access
+gsutil iam ch serviceAccount:YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com:objectAdmin gs://YOUR_PROJECT_ID-watchlist
+```
+
+### Deploy with GCS Bucket
+
+```bash
+gcloud run deploy stock-analyzer \
+  --source . \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --memory 512Mi \
+  --timeout 300 \
+  --set-env-vars "GCS_BUCKET=YOUR_PROJECT_ID-watchlist"
+```
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GCS_BUCKET` | No | GCS bucket for watchlist. If not set, uses local config.json (read-only) |
+
+**Cost**: Free within 5GB Cloud Storage limit.
+
+---
+
 ## Local Testing with Docker
 
 ```bash

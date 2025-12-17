@@ -15,6 +15,7 @@ from functools import partial
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from mystic_pulse import calculate_mystic_pulse, get_mystic_pulse_summary
+from watchlist import get_watchlist_storage
 
 # Load environment variables
 load_dotenv()
@@ -160,6 +161,48 @@ async def clear_cache():
         "cleared_entries": cleared_count,
         "timestamp": datetime.now().isoformat()
     }
+
+# ============================================
+# Watchlist Management Endpoints
+# ============================================
+
+@app.get("/api/watchlist")
+async def get_watchlist():
+    """Get current watchlist."""
+    storage = get_watchlist_storage()
+    watchlist = storage.get_watchlist()
+    return {
+        "success": True,
+        "watchlist": watchlist,
+        "is_writable": storage.is_writable,
+        "storage_backend": storage.storage_backend
+    }
+
+@app.delete("/api/watchlist")
+async def clear_watchlist():
+    """Clear all stocks from watchlist."""
+    storage = get_watchlist_storage()
+    result = storage.clear_watchlist()
+    return result
+
+@app.post("/api/watchlist/{symbol}")
+async def add_to_watchlist(symbol: str):
+    """Add stock to watchlist."""
+    storage = get_watchlist_storage()
+    result = storage.add_stock(symbol)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
+@app.delete("/api/watchlist/{symbol}")
+async def remove_from_watchlist(symbol: str):
+    """Remove stock from watchlist."""
+    storage = get_watchlist_storage()
+    result = storage.remove_stock(symbol)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
 
 def get_sentiment(ticker_symbol):
     # Retrieve news (yfinance might be limited, but we try)

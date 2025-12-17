@@ -116,12 +116,56 @@ function CacheControl() {
     );
 }
 
+// ============================================
+// Request Queue for Concurrency Limiting
+// ============================================
+class RequestQueue {
+    constructor(concurrency = 3) {
+        this.concurrency = concurrency;
+        this.running = 0;
+        this.queue = [];
+    }
+
+    add(fn) {
+        return new Promise((resolve, reject) => {
+            this.queue.push({ fn, resolve, reject });
+            this.processNext();
+        });
+    }
+
+    async processNext() {
+        if (this.running >= this.concurrency || this.queue.length === 0) return;
+
+        this.running++;
+        const { fn, resolve, reject } = this.queue.shift();
+
+        try {
+            const result = await fn();
+            resolve(result);
+        } catch (err) {
+            reject(err);
+        } finally {
+            this.running--;
+            this.processNext();
+        }
+    }
+}
+
+// Create a global queue instance limiting to 3 concurrent requests
+const apiQueue = new RequestQueue(3);
+
 function App() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [addingStock, setAddingStock] = useState(false);
     const [loadingStock, setLoadingStock] = useState(null);
+    const [watchlistVersion, setWatchlistVersion] = useState(0);
+
+    // Called when a stock is added to watchlist (from Search component)
+    const handleWatchlistChange = () => {
+        setWatchlistVersion(v => v + 1);
+    };
 
     const handleSearch = async (query) => {
         setLoading(true);
@@ -209,10 +253,92 @@ function App() {
         });
     };
 
+    // Analyze all stocks from a list (for "Analyze All" button)
+    const handleAnalyzeAll = async (tickers) => {
+        if (!tickers || tickers.length === 0) return;
+
+        // Filter out already analyzed stocks
+        const existingSymbols = data && Array.isArray(data) ? data.map(s => s.symbol) : [];
+        const newTickers = tickers.filter(t => !existingSymbols.includes(t));
+
+        if (newTickers.length === 0) return;
+
+        setLoading(true);
+        setError(null);
+        try {
+            const response = await fetch('/api/analyze-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tickers: newTickers })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch stock data');
+            }
+
+            const newStockData = await response.json();
+
+            if (newStockData && newStockData.length > 0) {
+                setData(prevData => {
+                    if (prevData && Array.isArray(prevData)) {
+                        return [...newStockData, ...prevData];
+                    }
+                    return newStockData;
+                });
+            }
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Refresh a single stock's data (force fresh fetch)
+    const handleRefreshStock = async (symbol) => {
+        setLoadingStock(symbol);
+        try {
+            const response = await fetch('/api/analyze-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tickers: [symbol] })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to refresh stock data');
+            }
+
+            const newStockData = await response.json();
+
+            if (newStockData && newStockData.length > 0) {
+                // Replace the old stock data with fresh data
+                setData(prevData => {
+                    if (prevData && Array.isArray(prevData)) {
+                        return prevData.map(s =>
+                            s.symbol === symbol ? { ...newStockData[0], _lastRefreshed: Date.now() } : s
+                        );
+                    }
+                    return newStockData;
+                });
+            }
+        } catch (err) {
+            console.error('Error refreshing stock:', err);
+        } finally {
+            setLoadingStock(null);
+        }
+    };
+
     // Get list of analyzed stock symbols for display
     const analyzedStocks = data && Array.isArray(data)
         ? data.filter(s => !s.error).map(s => s.symbol)
         : [];
+
+    // Clear all analyzed stocks
+    const handleClearAnalysis = () => {
+        if (data && confirm('Are you sure you want to clear all analyzed stocks?')) {
+            setData(null);
+            setError(null);
+        }
+    };
 
     return (
         <div className="container">
@@ -226,15 +352,19 @@ function App() {
 
             <WatchlistTags
                 onAddStock={handleAddStock}
+                onAnalyzeAll={handleAnalyzeAll}
                 analyzedStocks={analyzedStocks}
                 disabled={loading || addingStock}
                 loadingStock={loadingStock}
+                refreshTrigger={watchlistVersion}
             />
 
             <Search
                 onSearch={handleSearch}
                 onAddStock={handleAddStock}
                 onRemoveStock={handleRemoveStock}
+                onWatchlistChange={handleWatchlistChange}
+                onClearAnalysis={handleClearAnalysis}
                 disabled={loading}
                 addingStock={addingStock}
                 analyzedStocks={analyzedStocks}
@@ -254,7 +384,7 @@ function App() {
                 </div>
             )}
 
-            {data && <Dashboard data={data} />}
+            {data && <Dashboard data={data} onRefreshStock={handleRefreshStock} refreshingStock={loadingStock} />}
 
         </div>
     );
@@ -263,25 +393,80 @@ function App() {
 
 
 // Watchlist tags shown above search - click to add stock to analysis
-function WatchlistTags({ onAddStock, analyzedStocks = [], disabled, loadingStock }) {
+// Hover over tag to show minus sign for removal from watchlist
+function WatchlistTags({ onAddStock, onAnalyzeAll, analyzedStocks = [], disabled, loadingStock, refreshTrigger }) {
     const [watchlist, setWatchlist] = useState([]);
     const [hoveredStock, setHoveredStock] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [isWritable, setIsWritable] = useState(false);
+    const [removingSymbol, setRemovingSymbol] = useState(null);
 
-    useEffect(() => {
-        fetch('/static/config.json')
+    const fetchWatchlist = () => {
+        fetch('/api/watchlist')
             .then(res => res.json())
-            .then(config => {
-                setWatchlist(config.defaultWatchlist || []);
+            .then(data => {
+                setWatchlist(data.watchlist || []);
+                setIsWritable(data.is_writable || false);
                 setLoading(false);
             })
             .catch(() => {
-                setWatchlist(['AAPL', 'NVDA', 'TSLA', 'GOOGL', 'AMZN']);
-                setLoading(false);
+                // Fallback to static config
+                fetch('/static/config.json')
+                    .then(res => res.json())
+                    .then(config => {
+                        setWatchlist(config.defaultWatchlist || []);
+                        setLoading(false);
+                    })
+                    .catch(() => {
+                        setWatchlist(['AAPL', 'NVDA', 'TSLA', 'GOOGL', 'AMZN']);
+                        setLoading(false);
+                    });
             });
+    };
+
+    useEffect(() => {
+        fetchWatchlist();
     }, []);
 
-    if (loading || watchlist.length === 0) {
+    // Re-fetch when refreshTrigger changes (happens when stock added from search)
+    useEffect(() => {
+        if (refreshTrigger > 0) {
+            fetchWatchlist();
+        }
+    }, [refreshTrigger]);
+
+
+
+    const handleRemoveFromWatchlist = async (symbol) => {
+        setRemovingSymbol(symbol);
+        try {
+            const res = await fetch(`/api/watchlist/${symbol}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.success) {
+                setWatchlist(data.watchlist);
+            }
+        } catch (err) {
+            console.error('Failed to remove from watchlist:', err);
+        } finally {
+            setRemovingSymbol(null);
+        }
+    };
+
+    const handleClearWatchlist = async () => {
+        if (!confirm('Are you sure you want to remove all stocks from your watchlist?')) return;
+
+        try {
+            const res = await fetch('/api/watchlist', { method: 'DELETE' });
+            const data = await res.json();
+            if (data.success) {
+                setWatchlist([]);
+            }
+        } catch (err) {
+            console.error('Failed to clear watchlist:', err);
+        }
+    };
+
+    if (loading) {
         return null;
     }
 
@@ -296,82 +481,168 @@ function WatchlistTags({ onAddStock, analyzedStocks = [], disabled, loadingStock
             <div style={{
                 display: 'flex',
                 alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '0.5rem'
+                justifyContent: 'space-between'
             }}>
-                <span style={{
-                    fontSize: '0.8rem',
-                    color: 'var(--text-secondary)',
-                    marginRight: '0.25rem',
-                    fontWeight: 500
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '0.5rem',
+                    flex: 1
                 }}>
-                    📋 Watchlist:
-                </span>
-                {watchlist.map(symbol => {
-                    const isAnalyzed = analyzedStocks.includes(symbol);
-                    const isHovered = hoveredStock === symbol;
-                    const isLoading = loadingStock === symbol;
+                    <span style={{
+                        fontSize: '0.8rem',
+                        color: 'var(--text-secondary)',
+                        marginRight: '0.25rem',
+                        fontWeight: 500
+                    }}>
+                        📋 Watchlist:
+                    </span>
+                    {/* Analyze All button - show when there are unanalyzed stocks */}
+                    {(() => {
+                        const unanalyzedCount = watchlist.filter(s => !analyzedStocks.includes(s)).length;
+                        if (unanalyzedCount > 0 && onAnalyzeAll && !disabled) {
+                            return (
+                                <>
+                                    <button
+                                        onClick={() => onAnalyzeAll(watchlist)}
+                                        style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.25rem',
+                                            padding: '0.2rem 0.6rem',
+                                            background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                                            borderRadius: '16px',
+                                            fontSize: '0.75rem',
+                                            fontWeight: 600,
+                                            color: 'white',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s ease',
+                                            boxShadow: '0 2px 6px rgba(102, 126, 234, 0.3)'
+                                        }}
+                                        title={`Analyze all ${unanalyzedCount} unanalyzed stocks`}
+                                    >
+                                        🚀 Analyze All ({unanalyzedCount})
+                                    </button>
+                                </>
+                            );
+                        }
+                        return null;
+                    })()}
 
-                    return (
-                        <span
-                            key={symbol}
-                            onMouseEnter={() => !isAnalyzed && !isLoading && setHoveredStock(symbol)}
-                            onMouseLeave={() => setHoveredStock(null)}
-                            onClick={() => !isAnalyzed && !disabled && !isLoading && onAddStock && onAddStock(symbol)}
+                    {/* Remove All button - show when there are items in watchlist */}
+                    {watchlist.length > 0 && !disabled && (
+                        <button
+                            onClick={handleClearWatchlist}
                             style={{
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 gap: '0.25rem',
                                 padding: '0.2rem 0.6rem',
-                                background: isLoading
-                                    ? 'linear-gradient(135deg, rgba(243, 156, 18, 0.2), rgba(241, 196, 15, 0.2))'
-                                    : isAnalyzed
-                                        ? 'rgba(0, 0, 0, 0.05)'
-                                        : isHovered
-                                            ? 'linear-gradient(135deg, rgba(39, 174, 96, 0.2), rgba(46, 204, 113, 0.2))'
-                                            : 'white',
+                                background: 'rgba(239, 83, 80, 0.1)',
                                 borderRadius: '16px',
-                                fontSize: '0.8rem',
+                                fontSize: '0.75rem',
                                 fontWeight: 600,
-                                color: isLoading
-                                    ? '#f39c12'
-                                    : isAnalyzed
-                                        ? '#999'
-                                        : isHovered
-                                            ? '#27ae60'
-                                            : '#667eea',
-                                border: isLoading
-                                    ? '1px solid rgba(243, 156, 18, 0.3)'
-                                    : isAnalyzed
-                                        ? '1px solid rgba(0, 0, 0, 0.1)'
-                                        : isHovered
-                                            ? '1px solid rgba(39, 174, 96, 0.3)'
-                                            : '1px solid rgba(102, 126, 234, 0.2)',
-                                cursor: isAnalyzed || isLoading ? 'default' : 'pointer',
-                                transition: 'all 0.2s ease',
-                                opacity: isAnalyzed ? 0.6 : 1
+                                color: '#ef5350',
+                                border: '1px solid rgba(239, 83, 80, 0.2)',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease'
                             }}
+                            title="Remove all stocks from watchlist"
                         >
-                            {symbol}
-                            {isLoading && (
-                                <span style={{
-                                    fontSize: '0.7rem',
-                                    animation: 'spin 1s linear infinite'
-                                }}>⏳</span>
-                            )}
-                            {isHovered && !isAnalyzed && !isLoading && (
-                                <span style={{ fontSize: '0.7rem', fontWeight: 700 }}>＋</span>
-                            )}
-                            {isAnalyzed && (
-                                <span style={{ fontSize: '0.65rem' }}>✓</span>
-                            )}
-                        </span>
-                    );
-                })}
+                            🗑️ Remove All
+                        </button>
+                    )}
+                    {watchlist.map(symbol => {
+                        const isAnalyzed = analyzedStocks.includes(symbol);
+                        const isHovered = hoveredStock === symbol;
+                        const isLoading = loadingStock === symbol;
+                        const isRemoving = removingSymbol === symbol;
+
+                        return (
+                            <span
+                                key={symbol}
+                                onMouseEnter={() => setHoveredStock(symbol)}
+                                onMouseLeave={() => setHoveredStock(null)}
+                                onClick={() => {
+                                    // Clicking on the tag itself adds to analysis (if not already analyzed)
+                                    if (isRemoving || isLoading) return;
+                                    if (!isAnalyzed && !disabled && onAddStock) {
+                                        onAddStock(symbol);
+                                    }
+                                }}
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    padding: '0.2rem 0.6rem',
+                                    background: isRemoving
+                                        ? 'linear-gradient(135deg, rgba(231, 76, 60, 0.2), rgba(192, 57, 43, 0.2))'
+                                        : isLoading
+                                            ? 'linear-gradient(135deg, rgba(243, 156, 18, 0.2), rgba(241, 196, 15, 0.2))'
+                                            : isAnalyzed
+                                                ? 'rgba(0, 0, 0, 0.05)'
+                                                : 'white',
+                                    borderRadius: '16px',
+                                    fontSize: '0.8rem',
+                                    fontWeight: 600,
+                                    color: isRemoving
+                                        ? '#e74c3c'
+                                        : isLoading
+                                            ? '#f39c12'
+                                            : isAnalyzed
+                                                ? '#999'
+                                                : '#667eea',
+                                    border: isRemoving
+                                        ? '1px solid rgba(231, 76, 60, 0.3)'
+                                        : isLoading
+                                            ? '1px solid rgba(243, 156, 18, 0.3)'
+                                            : isAnalyzed
+                                                ? '1px solid rgba(0, 0, 0, 0.1)'
+                                                : '1px solid rgba(102, 126, 234, 0.2)',
+                                    cursor: isAnalyzed || isLoading ? 'default' : 'pointer',
+                                    transition: 'all 0.2s ease',
+                                    opacity: isAnalyzed ? 0.6 : 1
+                                }}
+                            >
+                                {symbol}
+                                {isRemoving && (
+                                    <span style={{ fontSize: '0.7rem', animation: 'spin 1s linear infinite' }}>⏳</span>
+                                )}
+                                {isLoading && (
+                                    <span style={{ fontSize: '0.7rem', animation: 'spin 1s linear infinite' }}>⏳</span>
+                                )}
+                                {/* Minus button - click to remove from watchlist */}
+                                {!isRemoving && !isLoading && isHovered && isWritable && !isAnalyzed && (
+                                    <span
+                                        onClick={(e) => {
+                                            e.stopPropagation(); // Prevent triggering parent click
+                                            handleRemoveFromWatchlist(symbol);
+                                        }}
+                                        style={{
+                                            fontSize: '0.75rem',
+                                            fontWeight: 700,
+                                            color: '#e74c3c',
+                                            cursor: 'pointer',
+                                            padding: '0 2px',
+                                            marginLeft: '2px'
+                                        }}
+                                        title="Remove from watchlist"
+                                    >−</span>
+                                )}
+                                {isAnalyzed && (
+                                    <span style={{ fontSize: '0.65rem' }}>✓</span>
+                                )}
+                            </span>
+                        );
+                    })}
+                </div>
             </div>
         </div>
     );
 }
+
 
 
 function MarketNews() {
@@ -866,7 +1137,7 @@ function YouTubeStocks() {
     );
 }
 
-function Search({ onSearch, onAddStock, onRemoveStock, disabled, addingStock, analyzedStocks = [] }) {
+function Search({ onSearch, onAddStock, onRemoveStock, onWatchlistChange, onClearAnalysis, disabled, addingStock, analyzedStocks = [] }) {
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(true);
     const [searchResults, setSearchResults] = useState([]);
@@ -933,7 +1204,7 @@ function Search({ onSearch, onAddStock, onRemoveStock, disabled, addingStock, an
         }, 250);
     };
 
-    const handleSelect = (stock) => {
+    const handleSelect = async (stock) => {
         // Clear dropdown and the partial text typed
         setSearchResults([]);
         setShowDropdown(false);
@@ -948,6 +1219,16 @@ function Search({ onSearch, onAddStock, onRemoveStock, disabled, addingStock, an
                 setInput(parts.length > 0 ? parts.join(', ') + ', ' : '');
             }
         }
+
+        // Auto-add to watchlist and refresh watchlist display
+        fetch(`/api/watchlist/${stock.symbol}`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && onWatchlistChange) {
+                    onWatchlistChange();
+                }
+            })
+            .catch(err => console.log('Watchlist add (optional):', err));
 
         // Immediately fetch and display the stock
         if (onAddStock) {
@@ -1082,6 +1363,29 @@ function Search({ onSearch, onAddStock, onRemoveStock, disabled, addingStock, an
                     }}>
                         📊 Analyzing:
                     </span>
+                    {onClearAnalysis && (
+                        <button
+                            onClick={onClearAnalysis}
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                                padding: '0.15rem 0.5rem',
+                                background: 'rgba(239, 83, 80, 0.1)',
+                                borderRadius: '12px',
+                                fontSize: '0.7rem',
+                                fontWeight: 600,
+                                color: '#ef5350',
+                                border: '1px solid rgba(239, 83, 80, 0.2)',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease',
+                                marginRight: '0.5rem'
+                            }}
+                            title="Clear all analyzed stocks"
+                        >
+                            🗑️ Clear
+                        </button>
+                    )}
                     {analyzedStocks.map(symbol => (
                         <span
                             key={symbol}
@@ -1273,14 +1577,19 @@ function QuickAddStock({ onAddStock, disabled }) {
 }
 
 
-function Dashboard({ data }) {
+function Dashboard({ data, onRefreshStock, refreshingStock }) {
     const stocks = Array.isArray(data) ? data : [data];
     return (
         <div>
             <CSPSummaryTable stocks={stocks} />
             <div className="stock-grid">
                 {stocks.map((stock, idx) => (
-                    <StockAnalysis key={stock.symbol || idx} data={stock} />
+                    <StockAnalysis
+                        key={stock.symbol || idx}
+                        data={stock}
+                        onRefresh={onRefreshStock}
+                        isRefreshing={refreshingStock === stock.symbol}
+                    />
                 ))}
             </div>
         </div>
@@ -1845,7 +2154,7 @@ function CSPSummaryTable({ stocks }) {
     );
 }
 
-function StockAnalysis({ data }) {
+function StockAnalysis({ data, onRefresh, isRefreshing }) {
     if (data.error) {
         return (
             <div className="stock-grid-item" style={{ borderColor: 'var(--danger)' }}>
@@ -1865,7 +2174,43 @@ function StockAnalysis({ data }) {
                     <h2 style={{ fontSize: '1.8rem', fontWeight: 700, margin: 0 }}>{data.symbol}</h2>
                     <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Real-time Analysis</div>
                 </div>
-                <div className="price-display" style={{ margin: 0 }}>${data.price.toFixed(2)}</div>
+                <div className="price-display" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <span>${data.price.toFixed(2)}</span>
+                    {onRefresh && (
+                        <button
+                            onClick={() => onRefresh(data.symbol)}
+                            disabled={isRefreshing}
+                            style={{
+                                background: 'rgba(102, 126, 234, 0.1)',
+                                border: 'none',
+                                color: '#667eea',
+                                borderRadius: '50%',
+                                width: '32px',
+                                height: '32px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: isRefreshing ? 'default' : 'pointer',
+                                opacity: isRefreshing ? 0.7 : 1,
+                                padding: 0,
+                                transition: 'all 0.2s ease'
+                            }}
+                            onMouseEnter={(e) => !isRefreshing && (e.target.style.background = 'rgba(102, 126, 234, 0.2)')}
+                            onMouseLeave={(e) => !isRefreshing && (e.target.style.background = 'rgba(102, 126, 234, 0.1)')}
+                            title="Refresh Data"
+                        >
+                            <span style={{
+                                animation: isRefreshing ? 'spin 1s linear infinite' : 'none',
+                                display: 'inline-block',
+                                fontSize: '1.2rem',
+                                lineHeight: 1,
+                                fontWeight: 'bold'
+                            }}>
+                                ↻
+                            </span>
+                        </button>
+                    )}
+                </div>
             </div>
 
             <div className="dashboard" style={{ gridTemplateColumns: '1fr', gap: '1rem', animation: 'none' }}>
@@ -1878,11 +2223,11 @@ function StockAnalysis({ data }) {
                     </div>
                 </Card>
 
-                <VolatilityCard symbol={data.symbol} />
+                <VolatilityCard key={`vol-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} />
 
-                <MysticPulseCard symbol={data.symbol} />
+                <MysticPulseCard key={`pulse-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} />
 
-                <CSPMetricsCard symbol={data.symbol} />
+                <CSPMetricsCard key={`csp-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} />
 
                 <Card title="Key Indicators">
                     <RSIVisualizer value={data.indicators.RSI} />
@@ -1915,11 +2260,10 @@ function VolatilityCard({ symbol }) {
         setLoading(true);
         setError(null);
 
-        fetch(`/api/volatility/${symbol}`)
-            .then(res => {
-                if (!res.ok) throw new Error('Failed to fetch volatility data');
-                return res.json();
-            })
+        apiQueue.add(() => fetch(`/api/volatility/${symbol}`).then(res => {
+            if (!res.ok) throw new Error('Failed to fetch volatility data');
+            return res.json();
+        }))
             .then(data => {
                 setVolData(data);
                 setLoading(false);
@@ -2104,11 +2448,10 @@ function CSPMetricsCard({ symbol }) {
         setLoading(true);
         setError(null);
 
-        fetch(`/api/csp-metrics/${symbol}`)
-            .then(res => {
-                if (!res.ok) throw new Error('Failed to fetch CSP metrics');
-                return res.json();
-            })
+        apiQueue.add(() => fetch(`/api/csp-metrics/${symbol}`).then(res => {
+            if (!res.ok) throw new Error('Failed to fetch CSP metrics');
+            return res.json();
+        }))
             .then(data => {
                 setCspData(data);
                 setLoading(false);
@@ -2415,11 +2758,10 @@ function PriceChart({ symbol }) {
         setLoading(true);
         setError(null);
 
-        fetch(`/api/history/${symbol}?period=${period}`)
-            .then(res => {
-                if (!res.ok) throw new Error('Failed to fetch history');
-                return res.json();
-            })
+        apiQueue.add(() => fetch(`/api/history/${symbol}?period=${period}`).then(res => {
+            if (!res.ok) throw new Error('Failed to fetch history');
+            return res.json();
+        }))
             .then(data => {
                 if (!data.history || data.history.length === 0) {
                     throw new Error('No data');
@@ -2811,11 +3153,10 @@ function MysticPulseCard({ symbol }) {
         setLoading(true);
         setError(null);
 
-        fetch(`/api/mystic-pulse/${symbol}?period=1y`)
-            .then(res => {
-                if (!res.ok) throw new Error('Failed to fetch Mystic Pulse data');
-                return res.json();
-            })
+        apiQueue.add(() => fetch(`/api/mystic-pulse/${symbol}?period=1y`).then(res => {
+            if (!res.ok) throw new Error('Failed to fetch Mystic Pulse data');
+            return res.json();
+        }))
             .then(data => {
                 setPulseData(data);
                 setLoading(false);
