@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+import lxml # Ensure lxml is available for read_html
+from sp100_tickers import SP100_TICKERS
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -617,8 +619,19 @@ def _analyze_ticker(ticker: str):
             return None
         return val
 
+    # Get Market Cap (try fast_info first)
+    market_cap = None
+    try:
+        market_cap = stock.fast_info['market_cap']
+    except:
+        try:
+            market_cap = stock.info.get('marketCap')
+        except:
+            market_cap = None
+
     data = {
         "symbol": ticker,
+        "market_cap": sanitize(market_cap),
         "price": sanitize(round(current_price, 2)),
         "change_1d": sanitize(round(change_1d, 2)),
         "change_1d_pct": sanitize(round(change_1d_pct, 2)),
@@ -1964,6 +1977,52 @@ def get_youtube_video_list():
     except Exception as e:
         print(f"Video list error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/sp100")
+async def get_sp100_data():
+    """Fetch S&P 100 data."""
+    # 1. Get Tickers
+    tickers = []
+    try:
+        # Try fetching from Wikipedia
+        tables = pd.read_html('https://en.wikipedia.org/wiki/S%26P_100')
+        # Usually the first table
+        df = tables[2] # Table 2 is usually the components list (historically, check if 0 or 2)
+        # Wikipedia structure changes. fallback is safer.
+        # Let's try table 0 first as it's most common for "Components"
+        # Actually, let's just use the static list for reliability and speed as requested by "fetch 100 stocks"
+        # and simple "add to application". Wikipedia scraping is flaky.
+        tickers = SP100_TICKERS
+    except Exception as e:
+        print(f"Error fetching S&P 100 list: {e}")
+        tickers = SP100_TICKERS
+
+    # 2. Fetch Data in Parallel
+    # Use ThreadPoolExecutor for parallel processing
+    max_workers = min(32, len(tickers) + 4)
+    
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Use _analyze_ticker_cached to leverage existing cache
+        tasks = [loop.run_in_executor(executor, _analyze_ticker_cached, ticker) 
+                 for ticker in tickers]
+        # Return results, ignoring errors or including them
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Filter out exceptions if any
+    final_results = []
+    for res in results:
+        if isinstance(res, dict) and "error" not in res:
+            final_results.append(res)
+        elif isinstance(res, dict) and "error" in res:
+             # Include error items so frontend knows? Or skip? 
+             # Let's skip valid errors but maybe log
+             final_results.append(res)
+        elif isinstance(res, Exception):
+            print(f"Error processing stock: {res}")
+            
+    return final_results
 
 
 if __name__ == "__main__":

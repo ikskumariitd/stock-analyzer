@@ -273,3 +273,92 @@ body {
     padding-bottom: 1rem;
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
+
+/* S&P 100 Table Styles */
+.sp100-container {
+    padding: 1rem;
+    background: white;
+    border-radius: 16px;
+    margin-top: 2rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.sp100-controls {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
+.sp100-search {
+    flex: 1;
+    padding: 0.8rem;
+    border-radius: 8px;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    background: white;
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+
+.sp100-table-wrapper {
+    overflow-x: auto;
+}
+
+.sp100-table {
+    width: 100%;
+    border-collapse: collapse;
+    color: var(--text-primary);
+}
+
+.sp100-table th, .sp100-table td {
+    padding: 1rem;
+    text-align: left;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.sp100-table th {
+    cursor: pointer;
+    user-select: none;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-primary);
+}
+
+.sp100-table th:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+.sp100-table tr:hover {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+.sort-icon {
+    display: inline-block;
+    margin-left: 5px;
+    font-size: 0.8em;
+}
+
+.positive-change { color: var(--success); }
+.negative-change { color: var(--danger); }
+
+.nav-button {
+    background: transparent;
+    border: 1px solid rgba(102, 126, 234, 0.5);
+    color: #667eea;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-weight: 600;
+}
+
+.nav-button:hover {
+    background: rgba(102, 126, 234, 0.1);
+}
+
+.nav-button.active {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    border-color: transparent;
+    color: white;
+    box-shadow: 0 4px 6px rgba(102, 126, 234, 0.2);
+}

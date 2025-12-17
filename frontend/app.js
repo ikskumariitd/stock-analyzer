@@ -154,7 +154,125 @@ class RequestQueue {
 // Create a global queue instance limiting to 3 concurrent requests
 const apiQueue = new RequestQueue(3);
 
+function SP100Page() {
+    const [stocks, setStocks] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [filter, setFilter] = useState("");
+    const [sortConfig, setSortConfig] = useState({ key: 'market_cap', direction: 'desc' });
+
+    useEffect(() => {
+        setLoading(true);
+        fetch('/api/sp100')
+            .then(res => res.json())
+            .then(data => {
+                setStocks(data);
+                setLoading(false);
+            })
+            .catch(err => {
+                console.error("Failed to fetch S&P 100 data", err);
+                setLoading(false);
+            });
+    }, []);
+
+    const handleSort = (key) => {
+        let direction = 'desc';
+        if (sortConfig.key === key && sortConfig.direction === 'desc') {
+            direction = 'asc';
+        }
+        setSortConfig({ key, direction });
+    };
+
+    const sortedStocks = React.useMemo(() => {
+        let sortable = [...stocks];
+        if (filter) {
+            const lowerFilter = filter.toLowerCase();
+            sortable = sortable.filter(s =>
+                s.symbol.toLowerCase().includes(lowerFilter)
+            );
+        }
+
+        if (sortConfig.key) {
+            sortable.sort((a, b) => {
+                if (a[sortConfig.key] < b[sortConfig.key]) {
+                    return sortConfig.direction === 'asc' ? -1 : 1;
+                }
+                if (a[sortConfig.key] > b[sortConfig.key]) {
+                    return sortConfig.direction === 'asc' ? 1 : -1;
+                }
+                return 0;
+            });
+        }
+        return sortable;
+    }, [stocks, filter, sortConfig]);
+
+    const formatMarketCap = (num) => {
+        if (!num) return "-";
+        if (num >= 1e12) return (num / 1e12).toFixed(2) + "T";
+        if (num >= 1e9) return (num / 1e9).toFixed(2) + "B";
+        if (num >= 1e6) return (num / 1e6).toFixed(2) + "M";
+        return num.toLocaleString();
+    };
+
+    return (
+        <div className="sp100-container">
+            <h2 style={{ marginBottom: '1rem' }}>🏆 S&P 100 Components</h2>
+
+            <div className="sp100-controls">
+                <input
+                    type="text"
+                    placeholder="Filter by symbol..."
+                    className="sp100-search"
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                />
+            </div>
+
+            {loading ? (
+                <div style={{ textAlign: 'center', padding: '2rem' }}>Loading Market Data...</div>
+            ) : (
+                <div className="sp100-table-wrapper">
+                    <table className="sp100-table">
+                        <thead>
+                            <tr>
+                                <th onClick={() => handleSort('symbol')}>
+                                    Symbol {sortConfig.key === 'symbol' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
+                                </th>
+                                <th onClick={() => handleSort('price')}>
+                                    Price {sortConfig.key === 'price' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
+                                </th>
+                                <th onClick={() => handleSort('change_1d_pct')}>
+                                    Change % {sortConfig.key === 'change_1d_pct' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
+                                </th>
+                                <th onClick={() => handleSort('market_cap')}>
+                                    Market Cap {sortConfig.key === 'market_cap' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
+                                </th>
+                                <th>RSI</th>
+                                <th>Sentiment</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {sortedStocks.map(stock => (
+                                <tr key={stock.symbol}>
+                                    <td style={{ fontWeight: 'bold' }}>{stock.symbol}</td>
+                                    <td>${stock.price}</td>
+                                    <td className={stock.change_1d_pct >= 0 ? 'positive-change' : 'negative-change'}>
+                                        {stock.change_1d_pct > 0 ? '+' : ''}{stock.change_1d_pct}%
+                                    </td>
+                                    <td>{formatMarketCap(stock.market_cap)}</td>
+                                    <td>{stock.indicators?.RSI || '-'}</td>
+                                    <td>{stock.sentiment?.mood || '-'}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
+}
+
 function App() {
+    const [currentView, setCurrentView] = useState('home');
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -347,45 +465,62 @@ function App() {
                     <h1>Stock Analyzer Pro</h1>
                     <p>Professional Technical Analysis & Sentiment</p>
                 </div>
-                <CacheControl />
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <button
+                        className={`nav-button ${currentView === 'home' ? 'active' : ''}`}
+                        onClick={() => setCurrentView('home')}
+                    >
+                        🏠 Dashboard
+                    </button>
+                    <button
+                        className={`nav-button ${currentView === 'sp100' ? 'active' : ''}`}
+                        onClick={() => setCurrentView('sp100')}
+                    >
+                        🏆 S&P 100
+                    </button>
+                    <CacheControl />
+                </div>
             </header>
 
-            <WatchlistTags
-                onAddStock={handleAddStock}
-                onAnalyzeAll={handleAnalyzeAll}
-                analyzedStocks={analyzedStocks}
-                disabled={loading || addingStock}
-                loadingStock={loadingStock}
-                refreshTrigger={watchlistVersion}
-            />
+            {currentView === 'home' ? (
+                <>
+                    <WatchlistTags
+                        onAddStock={handleAddStock}
+                        onAnalyzeAll={handleAnalyzeAll}
+                        analyzedStocks={analyzedStocks}
+                        disabled={loading || addingStock}
+                        loadingStock={loadingStock}
+                        refreshTrigger={watchlistVersion}
+                    />
 
-            <Search
-                onSearch={handleSearch}
-                onAddStock={handleAddStock}
-                onRemoveStock={handleRemoveStock}
-                onWatchlistChange={handleWatchlistChange}
-                onClearAnalysis={handleClearAnalysis}
-                disabled={loading}
-                addingStock={addingStock}
-                analyzedStocks={analyzedStocks}
-            />
+                    <Search
+                        onSearch={handleSearch}
+                        onAddStock={handleAddStock}
+                        onRemoveStock={handleRemoveStock}
+                        onWatchlistChange={handleWatchlistChange}
+                        onClearAnalysis={handleClearAnalysis}
+                        disabled={loading}
+                        addingStock={addingStock}
+                        analyzedStocks={analyzedStocks}
+                    />
 
-            {/* <YouTubeStocks /> - Hidden for now, revisit later */}
+                    {loading && (
+                        <div style={{ textAlign: 'center', margin: '2rem' }}>
+                            <div style={{ fontSize: '1.5rem', color: 'var(--accent-color)' }}>Analyzing Market Data...</div>
+                        </div>
+                    )}
 
-            {loading && (
-                <div style={{ textAlign: 'center', margin: '2rem' }}>
-                    <div style={{ fontSize: '1.5rem', color: 'var(--accent-color)' }}>Analyzing Market Data...</div>
-                </div>
+                    {error && (
+                        <div style={{ textAlign: 'center', color: 'var(--danger)', margin: '2rem', fontSize: '1.2rem' }}>
+                            Error: {error}
+                        </div>
+                    )}
+
+                    {data && <Dashboard data={data} onRefreshStock={handleRefreshStock} refreshingStock={loadingStock} />}
+                </>
+            ) : (
+                <SP100Page />
             )}
-
-            {error && (
-                <div style={{ textAlign: 'center', color: 'var(--danger)', margin: '2rem', fontSize: '1.2rem' }}>
-                    Error: {error}
-                </div>
-            )}
-
-            {data && <Dashboard data={data} onRefreshStock={handleRefreshStock} refreshingStock={loadingStock} />}
-
         </div>
     );
 }
