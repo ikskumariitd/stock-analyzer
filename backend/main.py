@@ -128,6 +128,47 @@ async def remove_from_watchlist(symbol: str):
         raise HTTPException(status_code=400, detail=result["message"])
     return result
 
+# ============================================
+# Favorites Management Endpoints
+# ============================================
+from favorites import get_favorites_storage
+
+@app.get("/api/favorites")
+async def get_favorites():
+    """Get current favorites."""
+    storage = get_favorites_storage()
+    favorites = storage.get_favorites()
+    return {
+        "success": True,
+        "favorites": favorites,
+        "storage_backend": storage.storage_backend
+    }
+
+@app.delete("/api/favorites")
+async def clear_favorites():
+    """Clear all stocks from favorites."""
+    storage = get_favorites_storage()
+    result = storage.clear_favorites()
+    return result
+
+@app.post("/api/favorites/{symbol}")
+async def add_to_favorites(symbol: str):
+    """Add stock to favorites."""
+    storage = get_favorites_storage()
+    result = storage.add_favorite(symbol)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
+@app.delete("/api/favorites/{symbol}")
+async def remove_from_favorites(symbol: str):
+    """Remove stock from favorites."""
+    storage = get_favorites_storage()
+    result = storage.remove_favorite(symbol)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
 
 def get_sentiment(ticker_symbol):
     # Retrieve news (yfinance might be limited, but we try)

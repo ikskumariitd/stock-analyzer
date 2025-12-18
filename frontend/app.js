@@ -603,6 +603,12 @@ function App() {
                         refreshTrigger={watchlistVersion}
                     />
 
+                    <FavoritesSection
+                        onAnalyzeAll={handleAnalyzeAll}
+                        analyzedStocks={analyzedStocks}
+                        disabled={loading || addingStock}
+                    />
+
                     <Search
                         onSearch={handleSearch}
                         onAddStock={handleAddStock}
@@ -901,6 +907,208 @@ function WatchlistTags({ onAddStock, onAnalyzeAll, analyzedStocks = [], disabled
 }
 
 
+
+function FavoritesSection({ onAnalyzeAll, analyzedStocks = [], disabled }) {
+    const [favorites, setFavorites] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [input, setInput] = useState('');
+    const [adding, setAdding] = useState(false);
+
+    // Autocomplete state
+    const [searchResults, setSearchResults] = useState([]);
+    const [showDropdown, setShowDropdown] = useState(false);
+    const debounceRef = React.useRef(null);
+    const wrapperRef = React.useRef(null);
+
+    const fetchFavorites = () => {
+        fetch('/api/favorites')
+            .then(res => res.json())
+            .then(data => {
+                setFavorites(data.favorites || []);
+                setLoading(false);
+            })
+            .catch(err => {
+                console.error("Failed to fetch favorites:", err);
+                setLoading(false);
+            });
+    };
+
+    useEffect(() => {
+        fetchFavorites();
+
+        // Click outside handler
+        const handleClickOutside = (event) => {
+            if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+                setShowDropdown(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, []);
+
+    const searchStocks = async (query) => {
+        if (!query || query.length < 1) {
+            setSearchResults([]);
+            setShowDropdown(false);
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/search-stocks/${encodeURIComponent(query)}`);
+            if (res.ok) {
+                const data = await res.json();
+                setSearchResults(data.results || []);
+                setShowDropdown(data.results && data.results.length > 0);
+            }
+        } catch (e) {
+            console.error('Search error:', e);
+        }
+    };
+
+    const handleInputChange = (e) => {
+        const value = e.target.value;
+        setInput(value);
+
+        if (debounceRef.current) {
+            clearTimeout(debounceRef.current);
+        }
+
+        debounceRef.current = setTimeout(() => {
+            if (value.trim().length >= 1) {
+                searchStocks(value.trim());
+            } else {
+                setSearchResults([]);
+                setShowDropdown(false);
+            }
+        }, 250);
+    };
+
+    const handleAddFavorite = async (eOrSymbol) => {
+        // Handle both form submit event and direct symbol string
+        let symbol;
+        if (typeof eOrSymbol === 'string') {
+            symbol = eOrSymbol;
+        } else {
+            eOrSymbol.preventDefault();
+            symbol = input.trim();
+        }
+
+        symbol = symbol.toUpperCase();
+        if (!symbol) return;
+
+        setAdding(true);
+        setShowDropdown(false);
+
+        try {
+            const res = await fetch(`/api/favorites/${symbol}`, { method: 'POST' });
+            const data = await res.json();
+            if (data.success) {
+                setFavorites(data.favorites);
+                setInput('');
+                setSearchResults([]);
+            } else {
+                alert(data.message);
+            }
+        } catch (err) {
+            console.error("Failed to add favorite:", err);
+        } finally {
+            setAdding(false);
+        }
+    };
+
+    const handleRemoveFavorite = async (symbol) => {
+        try {
+            const res = await fetch(`/api/favorites/${symbol}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.success) {
+                setFavorites(data.favorites);
+            }
+        } catch (err) {
+            console.error("Failed to remove favorite:", err);
+        }
+    };
+
+    if (loading) return null;
+
+    return (
+        <div className="favorites-section">
+            <div className="favorites-header">
+                <h3>⭐ Favorite Stocks</h3>
+                <div className="favorites-controls">
+                    <form onSubmit={handleAddFavorite} className="favorites-form" ref={wrapperRef}>
+                        <div style={{ position: 'relative' }}>
+                            <input
+                                type="text"
+                                value={input}
+                                onChange={handleInputChange}
+                                placeholder="Add symbol..."
+                                disabled={adding || disabled}
+                                onFocus={() => {
+                                    if (searchResults.length > 0) setShowDropdown(true);
+                                }}
+                            />
+                            {showDropdown && (
+                                <ul className="favorites-dropdown">
+                                    {searchResults.map((result) => (
+                                        <li
+                                            key={result.symbol}
+                                            onClick={() => handleAddFavorite(result.symbol)}
+                                        >
+                                            <strong>{result.symbol}</strong>
+                                            <span style={{ fontSize: '0.85em', color: '#666', marginLeft: '6px' }}>
+                                                {result.name}
+                                            </span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                        <button type="submit" disabled={adding || disabled || !input.trim()}>
+                            {adding ? '...' : '+'}
+                        </button>
+                    </form>
+                    {favorites.length > 0 && (
+                        <button
+                            className="analyze-favs-btn"
+                            onClick={() => onAnalyzeAll(favorites)}
+                            disabled={disabled}
+                            title="Analyze all favorites"
+                        >
+                            🚀 Analyze All
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {favorites.length === 0 ? (
+                <div className="favorites-empty">
+                    No favorite stocks yet. Add some to track them easily!
+                </div>
+            ) : (
+                <div className="favorites-list">
+                    {favorites.map(symbol => {
+                        const isAnalyzed = analyzedStocks.includes(symbol);
+                        return (
+                            <div key={symbol} className={`favorite-item ${isAnalyzed ? 'analyzed' : ''}`}>
+                                <span className="fav-symbol">{symbol}</span>
+                                <button
+                                    className="remove-fav-btn"
+                                    onClick={() => handleRemoveFavorite(symbol)}
+                                    disabled={disabled}
+                                    title="Remove from favorites"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+}
 
 function MarketNews() {
     const [news, setNews] = useState([]);
