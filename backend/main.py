@@ -1189,55 +1189,116 @@ async def analyze_batch(request: BatchRequest):
         return results
 
 @app.get("/api/history/{ticker}")
-async def get_history(ticker: str, period: str = "3y", include_bb: bool = True):
-    """Get price history for charting. Period can be: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 3y, 5y, 10y, max"""
+async def get_history(ticker: str, period: str = "3y", include_bb: bool = True, refresh: bool = False):
+    """Get price history for charting. Period can be: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 3y, 5y, 10y, max
+    
+    Parameters:
+    - ticker: Stock symbol
+    - period: History period to return (default: 3y) - data is filtered from cached full history
+    - include_bb: Include Bollinger Bands (default: true)
+    - refresh: Force fresh data fetch, bypassing cache (default: false)
+    
+    Caching strategy: Full 10y history is cached per ticker. Period filtering happens on response.
+    """
     import math
+    from datetime import datetime, timedelta
     
     def sanitize(val):
         if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
             return None
         return round(val, 2) if isinstance(val, float) else val
     
+    # Period to days mapping for filtering
+    period_days = {
+        "1d": 1,
+        "5d": 5,
+        "1mo": 30,
+        "3mo": 90,
+        "6mo": 180,
+        "1y": 365,
+        "2y": 730,
+        "3y": 1095,
+        "5y": 1825,
+        "10y": 3650,
+        "max": 99999  # Effectively no limit
+    }
+    
     try:
         ticker = ticker.upper().strip()
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period=period)
+        # Cache key is just ticker - we cache full history
+        cache_key = f"history:{ticker}"
         
-        if hist.empty:
-            raise HTTPException(status_code=404, detail=f"No history found for {ticker}")
+        full_history = None
         
-        # Calculate Bollinger Bands if requested
-        if include_bb and len(hist) >= 20:
-            # 20-period SMA
-            hist['BB_Middle'] = hist['Close'].rolling(window=20).mean()
-            # 20-period standard deviation
-            rolling_std = hist['Close'].rolling(window=20).std()
-            # Upper and lower bands (2 standard deviations)
-            hist['BB_Upper'] = hist['BB_Middle'] + (rolling_std * 2)
-            hist['BB_Lower'] = hist['BB_Middle'] - (rolling_std * 2)
+        # Check cache first (unless refresh requested)
+        if not refresh:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                full_history = cached.get("full_history", [])
         
-        history_data = []
-        for date, row in hist.iterrows():
-            data_point = {
-                "date": date.strftime("%Y-%m-%d"),
-                "open": sanitize(row["Open"]),
-                "high": sanitize(row["High"]),
-                "low": sanitize(row["Low"]),
-                "close": sanitize(row["Close"]),
-                "volume": int(row["Volume"]) if not math.isnan(row["Volume"]) else 0
-            }
+        # Fetch fresh data if needed
+        if full_history is None or refresh:
+            stock = yf.Ticker(ticker)
+            # Always fetch 10y to have full data
+            hist = stock.history(period="10y")
             
-            # Add BB data if available
-            if include_bb and 'BB_Upper' in hist.columns:
-                data_point["bb_upper"] = sanitize(row.get("BB_Upper"))
-                data_point["bb_middle"] = sanitize(row.get("BB_Middle"))
-                data_point["bb_lower"] = sanitize(row.get("BB_Lower"))
+            if hist.empty:
+                raise HTTPException(status_code=404, detail=f"No history found for {ticker}")
             
-            history_data.append(data_point)
+            # Calculate Bollinger Bands on full data
+            if len(hist) >= 20:
+                hist['BB_Middle'] = hist['Close'].rolling(window=20).mean()
+                rolling_std = hist['Close'].rolling(window=20).std()
+                hist['BB_Upper'] = hist['BB_Middle'] + (rolling_std * 2)
+                hist['BB_Lower'] = hist['BB_Middle'] - (rolling_std * 2)
+            
+            full_history = []
+            for date, row in hist.iterrows():
+                data_point = {
+                    "date": date.strftime("%Y-%m-%d"),
+                    "open": sanitize(row["Open"]),
+                    "high": sanitize(row["High"]),
+                    "low": sanitize(row["Low"]),
+                    "close": sanitize(row["Close"]),
+                    "volume": int(row["Volume"]) if not math.isnan(row["Volume"]) else 0
+                }
+                
+                if 'BB_Upper' in hist.columns:
+                    data_point["bb_upper"] = sanitize(row.get("BB_Upper"))
+                    data_point["bb_middle"] = sanitize(row.get("BB_Middle"))
+                    data_point["bb_lower"] = sanitize(row.get("BB_Lower"))
+                
+                full_history.append(data_point)
+            
+            # Cache the full history
+            cache.set(cache_key, {"full_history": full_history})
+        
+        # Filter history based on requested period
+        days = period_days.get(period, 1095)  # Default to 3y
+        if days < 99999 and full_history:
+            cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            filtered_history = [h for h in full_history if h["date"] >= cutoff_date]
+        else:
+            filtered_history = full_history
+        
+        # Optionally exclude BB data if not requested
+        if not include_bb and filtered_history:
+            for item in filtered_history:
+                item.pop("bb_upper", None)
+                item.pop("bb_middle", None)
+                item.pop("bb_lower", None)
+        
+        # Check if this was from cache
+        is_cached = not refresh and cache.get(cache_key) is not None
+        created_ts = cache.get_created_timestamp(cache_key) if is_cached else 0
+        cache_age = round((time_module.time() - created_ts) / 60, 1) if created_ts else 0
         
         return {
             "symbol": ticker,
-            "history": history_data
+            "period": period,
+            "history": filtered_history,
+            "_cached": is_cached,
+            "_cache_age_minutes": cache_age
         }
     except HTTPException:
         raise
@@ -1246,11 +1307,15 @@ async def get_history(ticker: str, period: str = "3y", include_bb: bool = True):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/volatility/{ticker}")
-async def get_volatility(ticker: str):
-    """Get volatility metrics for CSP strategy including IV Rank, HV, and recommendation."""
+async def get_volatility(ticker: str, refresh: bool = False):
+    """Get volatility metrics for CSP strategy including IV Rank, HV, and recommendation.
+    
+    Parameters:
+    - ticker: Stock symbol
+    - refresh: Force fresh data fetch, bypassing cache (default: false)
+    """
     try:
-        # Check cache inside the function now
-        result = calculate_volatility_metrics(ticker)
+        result = calculate_volatility_metrics(ticker, use_cache=not refresh)
         
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
@@ -1263,11 +1328,15 @@ async def get_volatility(ticker: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/csp-metrics/{ticker}")
-async def get_csp_metrics(ticker: str):
-    """Get CSP-specific metrics: 52-week range, ATR, support/resistance, earnings calendar."""
+async def get_csp_metrics(ticker: str, refresh: bool = False):
+    """Get CSP-specific metrics: 52-week range, ATR, support/resistance, earnings calendar.
+    
+    Parameters:
+    - ticker: Stock symbol
+    - refresh: Force fresh data fetch, bypassing cache (default: false)
+    """
     try:
-        # Check cache inside the function now
-        result = calculate_csp_metrics(ticker)
+        result = calculate_csp_metrics(ticker, use_cache=not refresh)
         
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
@@ -1347,15 +1416,18 @@ async def search_stocks(query: str):
 
 
 @app.get("/api/mystic-pulse/{ticker}")
-async def get_mystic_pulse(ticker: str, period: str = "1y", adx_length: int = 9, smoothing_factor: int = 1):
+async def get_mystic_pulse(ticker: str, period: str = "1y", adx_length: int = 9, smoothing_factor: int = 1, refresh: bool = False):
     """
     Get Mystic Pulse v2.0 indicator data for a stock.
     
     Parameters:
     - ticker: Stock symbol (e.g., AAPL)
-    - period: History period (default: 1y). Options: 1mo, 3mo, 6mo, 1y, 2y, 3y, 5y
+    - period: History period to return (default: 1y). Options: 1mo, 3mo, 6mo, 1y, 2y, 3y, 5y
     - adx_length: ADX smoothing length (default: 9)
     - smoothing_factor: OHLC SMA pre-smoothing length (default: 1)
+    - refresh: Force fresh data fetch, bypassing cache (default: false)
+    
+    Caching strategy: Full 10y Mystic Pulse data is cached per ticker. Period filtering happens on response.
     
     Returns OHLC data with Mystic Pulse values including:
     - di_plus, di_minus: Directional Index values
@@ -1364,6 +1436,7 @@ async def get_mystic_pulse(ticker: str, period: str = "1y", adx_length: int = 9,
     - pulse_color: RGB color string for visualization
     """
     import math
+    from datetime import datetime, timedelta
     
     def sanitize(val):
         if val is None:
@@ -1372,65 +1445,118 @@ async def get_mystic_pulse(ticker: str, period: str = "1y", adx_length: int = 9,
             return None
         return round(val, 4) if isinstance(val, float) else val
     
+    # Period to days mapping for filtering
+    period_days = {
+        "1mo": 30,
+        "3mo": 90,
+        "6mo": 180,
+        "1y": 365,
+        "2y": 730,
+        "3y": 1095,
+        "5y": 1825,
+        "10y": 3650,
+        "max": 99999
+    }
+    
     try:
         ticker = ticker.upper().strip()
-        cache_key = f"mystic_pulse:{ticker}:{period}:{adx_length}:{smoothing_factor}"
+        # Cache key is ticker + indicator params only (not period)
+        cache_key = f"mystic_pulse:{ticker}:{adx_length}:{smoothing_factor}"
         
-        # Check cache first
-        cached = cache.get(cache_key)
-        if cached is not None:
-            cached["_cached"] = True
-            return cached
+        full_data = None
         
-        # Fetch stock data
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period=period)
+        # Check cache first (unless refresh requested)
+        if not refresh:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                full_data = cached.get("full_data", [])
         
-        if hist.empty or len(hist) < 30:
-            raise HTTPException(status_code=400, detail=f"Insufficient data for {ticker}")
+        # Fetch and calculate fresh data if needed
+        if full_data is None or refresh:
+            stock = yf.Ticker(ticker)
+            # Always fetch 10y for full data
+            hist = stock.history(period="10y")
+            
+            if hist.empty or len(hist) < 30:
+                raise HTTPException(status_code=400, detail=f"Insufficient data for {ticker}")
+            
+            # Calculate Mystic Pulse on full data
+            pulse_df = calculate_mystic_pulse(
+                hist, 
+                adx_length=adx_length, 
+                smoothing_factor=smoothing_factor
+            )
+            
+            # Prepare full data points
+            full_data = []
+            for date, row in pulse_df.iterrows():
+                full_data.append({
+                    "date": date.strftime("%Y-%m-%d"),
+                    "open": sanitize(row["Open"]),
+                    "high": sanitize(row["High"]),
+                    "low": sanitize(row["Low"]),
+                    "close": sanitize(row["Close"]),
+                    "volume": int(row["Volume"]) if not math.isnan(row["Volume"]) else 0,
+                    "plus_di": sanitize(row.get("di_plus")),
+                    "minus_di": sanitize(row.get("di_minus")),
+                    "positive_intensity": sanitize(row.get("positive_intensity")),
+                    "negative_intensity": sanitize(row.get("negative_intensity")),
+                    "dominant_direction": int(row.get("dominant_direction", 0)),
+                    "pulse_color": row.get("pulse_color", "rgb(128,128,128)")
+                })
+            
+            # Cache the full data
+            cache.set(cache_key, {"full_data": full_data})
         
-        # Calculate Mystic Pulse
-        pulse_df = calculate_mystic_pulse(
-            hist, 
-            adx_length=adx_length, 
-            smoothing_factor=smoothing_factor
-        )
+        # Filter data based on requested period
+        days = period_days.get(period, 365)  # Default to 1y
+        if days < 99999 and full_data:
+            cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            filtered_data = [d for d in full_data if d["date"] >= cutoff_date]
+        else:
+            filtered_data = full_data
         
-        # Prepare response data
-        data_points = []
-        for date, row in pulse_df.iterrows():
-            data_points.append({
-                "date": date.strftime("%Y-%m-%d"),
-                "open": sanitize(row["Open"]),
-                "high": sanitize(row["High"]),
-                "low": sanitize(row["Low"]),
-                "close": sanitize(row["Close"]),
-                "volume": int(row["Volume"]) if not math.isnan(row["Volume"]) else 0,
-                "plus_di": sanitize(row.get("plus_di")),
-                "minus_di": sanitize(row.get("minus_di")),
-                "positive_intensity": sanitize(row.get("positive_intensity")),
-                "negative_intensity": sanitize(row.get("negative_intensity")),
-                "dominant_direction": int(row.get("dominant_direction", 0)),
-                "pulse_color": row.get("pulse_color", "rgb(128,128,128)")
-            })
+        # Generate summary from filtered data (use last entry for summary)
+        if filtered_data:
+            last = filtered_data[-1]
+            prev = filtered_data[-2] if len(filtered_data) > 1 else last
+            
+            trend_score = last.get("dominant_direction", 0)
+            strength = abs(last.get("positive_intensity", 0) if trend_score > 0 else last.get("negative_intensity", 0))
+            
+            if trend_score > 0:
+                trend = "bullish"
+            elif trend_score < 0:
+                trend = "bearish"
+            else:
+                trend = "neutral"
+            
+            summary = {
+                "trend": trend,
+                "strength": round(float(strength), 3),
+                "momentum": "steady",
+                "trend_score": trend_score,
+                "di_plus": last.get("plus_di", 0),
+                "di_minus": last.get("minus_di", 0),
+                "positive_intensity": last.get("positive_intensity", 0),
+                "negative_intensity": last.get("negative_intensity", 0),
+                "pulse_color": last.get("pulse_color", "rgb(128,128,128)")
+            }
+        else:
+            summary = {"error": "No data available"}
         
-        # Get summary
-        summary = get_mystic_pulse_summary(pulse_df)
+        # Check if this was from cache
+        is_cached = not refresh and cache.get(cache_key) is not None
         
-        result = {
+        return {
             "symbol": ticker,
             "period": period,
             "adx_length": adx_length,
             "smoothing_factor": smoothing_factor,
-            "data": data_points,
+            "data": filtered_data,
             "summary": summary,
-            "_cached": False
+            "_cached": is_cached
         }
-        
-        # Cache the result
-        cache.set(cache_key, result.copy())
-        
-        return result
         
     except HTTPException:
         raise

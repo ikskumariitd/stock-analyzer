@@ -588,6 +588,12 @@ function App() {
                     >
                         🏆 S&P 100
                     </button>
+                    <button
+                        className={`nav-button ${currentView === 'details' ? 'active' : ''}`}
+                        onClick={() => setCurrentView('details')}
+                    >
+                        🔍 Stock Details
+                    </button>
                     <CacheControl />
                 </div>
             </header>
@@ -643,10 +649,19 @@ function App() {
                         />
                     )}
                 </>
-            ) : (
+            ) : currentView === 'sp100' ? (
                 <SP100Page
                     data={sp100Data}
                     setData={setSp100Data}
+                />
+            ) : (
+                <StockDetailsPage
+                    watchlist={watchlist}
+                    analyzedStocks={analyzedStocks}
+                    onAddStock={handleAddStock}
+                    onRemoveStock={handleRemoveStock}
+                    onWatchlistChange={handleWatchlistChange}
+                    onClearAnalysis={handleClearAnalysis}
                 />
             )}
             <ScrollToTop />
@@ -2761,11 +2776,11 @@ function StockAnalysis({ data, onRefresh, isRefreshing }) {
                     </div>
                 </Card>
 
-                <VolatilityCard key={`vol-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} />
+                <VolatilityCard key={`vol-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
-                <MysticPulseCard key={`pulse-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} />
+                <MysticPulseCard key={`pulse-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
-                <CSPMetricsCard key={`csp-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} />
+                <CSPMetricsCard key={`csp-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
                 <Card title="Key Indicators">
                     <RSIVisualizer value={data.indicators.RSI} />
@@ -2778,7 +2793,7 @@ function StockAnalysis({ data, onRefresh, isRefreshing }) {
                 </Card>
 
                 <Card title="3-Year Price History">
-                    <PriceChart symbol={data.symbol} />
+                    <PriceChart key={`chart-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
                 </Card>
 
                 <Card title="Summary">
@@ -2789,7 +2804,7 @@ function StockAnalysis({ data, onRefresh, isRefreshing }) {
     );
 }
 
-function VolatilityCard({ symbol }) {
+function VolatilityCard({ symbol, refreshTrigger }) {
     const [volData, setVolData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -2798,7 +2813,10 @@ function VolatilityCard({ symbol }) {
         setLoading(true);
         setError(null);
 
-        apiQueue.add(() => fetch(`/api/volatility/${symbol}`).then(res => {
+        // If refreshTrigger is set (user clicked refresh), force fresh data
+        const needsRefresh = refreshTrigger ? '?refresh=true' : '';
+
+        apiQueue.add(() => fetch(`/api/volatility/${symbol}${needsRefresh}`).then(res => {
             if (!res.ok) throw new Error('Failed to fetch volatility data');
             return res.json();
         }))
@@ -2977,7 +2995,7 @@ function IVRankGauge({ ivRank, hvRank, currentIV, hv30, ivHvRatio }) {
     );
 }
 
-function CSPMetricsCard({ symbol }) {
+function CSPMetricsCard({ symbol, refreshTrigger }) {
     const [cspData, setCspData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -2986,7 +3004,10 @@ function CSPMetricsCard({ symbol }) {
         setLoading(true);
         setError(null);
 
-        apiQueue.add(() => fetch(`/api/csp-metrics/${symbol}`).then(res => {
+        // If refreshTrigger is set (user clicked refresh), force fresh data
+        const needsRefresh = refreshTrigger ? '?refresh=true' : '';
+
+        apiQueue.add(() => fetch(`/api/csp-metrics/${symbol}${needsRefresh}`).then(res => {
             if (!res.ok) throw new Error('Failed to fetch CSP metrics');
             return res.json();
         }))
@@ -3220,7 +3241,7 @@ function Week52RangeGauge({ currentPrice, high, low, position }) {
 // Recharts components from global
 const { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } = Recharts;
 
-function PriceChart({ symbol }) {
+function PriceChart({ symbol, refreshTrigger }) {
     const chartContainerRef = React.useRef(null);
     const chartRef = React.useRef(null);
     const seriesRef = React.useRef(null);
@@ -3232,6 +3253,7 @@ function PriceChart({ symbol }) {
     const [showBB, setShowBB] = useState(false); // Show Bollinger Bands
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const lastRefreshRef = React.useRef(refreshTrigger);
 
     const periods = [
         { label: '1W', value: '5d' },
@@ -3300,7 +3322,10 @@ function PriceChart({ symbol }) {
         setLoading(true);
         setError(null);
 
-        apiQueue.add(() => fetch(`/api/history/${symbol}?period=${period}`).then(res => {
+        // If refreshTrigger is set (user clicked refresh), force fresh data
+        const needsRefresh = refreshTrigger ? '&refresh=true' : '';
+
+        apiQueue.add(() => fetch(`/api/history/${symbol}?period=${period}${needsRefresh}`).then(res => {
             if (!res.ok) throw new Error('Failed to fetch history');
             return res.json();
         }))
@@ -3679,7 +3704,7 @@ function RSIVisualizer({ value }) {
 // ============================================
 // Mystic Pulse v2.0 Indicator Component with Price + Histogram Chart
 // ============================================
-function MysticPulseCard({ symbol }) {
+function MysticPulseCard({ symbol, refreshTrigger }) {
     const [pulseData, setPulseData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -3696,7 +3721,10 @@ function MysticPulseCard({ symbol }) {
         setLoading(true);
         setError(null);
 
-        apiQueue.add(() => fetch(`/api/mystic-pulse/${symbol}?period=1y`).then(res => {
+        // If refreshTrigger is set (user clicked refresh), force fresh data
+        const needsRefresh = refreshTrigger ? '&refresh=true' : '';
+
+        apiQueue.add(() => fetch(`/api/mystic-pulse/${symbol}?period=1y${needsRefresh}`).then(res => {
             if (!res.ok) throw new Error('Failed to fetch Mystic Pulse data');
             return res.json();
         }))
@@ -4066,6 +4094,383 @@ function ScrollToTop() {
         >
             ↑
         </button>
+    );
+}
+
+// Interactive Mystic Pulse Chart with Date Range Selection
+function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
+    const [period, setPeriod] = useState('3y'); // Default to 3 years
+    const [pulseData, setPulseData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    // Refs for charts
+    const priceChartContainerRef = React.useRef(null);
+    const priceChartRef = React.useRef(null);
+    const histogramContainerRef = React.useRef(null);
+    const histogramChartRef = React.useRef(null);
+
+    useEffect(() => {
+        setLoading(true);
+        setError(null);
+        setPulseData(null);
+
+        // If refreshTrigger is set (user clicked refresh), force fresh data
+        const needsRefresh = refreshTrigger ? '&refresh=true' : '';
+
+        apiQueue.add(() => fetch(`/api/mystic-pulse/${symbol}?period=${period}${needsRefresh}`).then(res => {
+            if (!res.ok) throw new Error('Failed to fetch Mystic Pulse data');
+            return res.json();
+        }))
+            .then(data => {
+                setPulseData(data);
+                setLoading(false);
+            })
+            .catch(err => {
+                setError(err.message);
+                setLoading(false);
+            });
+    }, [symbol, period, refreshTrigger]);
+
+    // Create charts when data is loaded (Reusing logic from MysticPulseCard but adapted)
+    useEffect(() => {
+        if (!pulseData || !pulseData.data || !priceChartContainerRef.current || !histogramContainerRef.current) return;
+
+        // Clean up existing charts
+        if (priceChartRef.current) {
+            priceChartRef.current.remove();
+            priceChartRef.current = null;
+        }
+        if (histogramChartRef.current) {
+            histogramChartRef.current.remove();
+            histogramChartRef.current = null;
+        }
+
+        // === PRICE CHART (Top) ===
+        const priceChart = LightweightCharts.createChart(priceChartContainerRef.current, {
+            width: priceChartContainerRef.current.clientWidth,
+            height: 300, // Taller chart for details page
+            layout: {
+                background: { type: 'solid', color: 'transparent' },
+                textColor: '#9ca3af',
+            },
+            grid: {
+                vertLines: { color: 'rgba(255, 255, 255, 0.03)' },
+                horzLines: { color: 'rgba(255, 255, 255, 0.03)' },
+            },
+            rightPriceScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+            },
+            timeScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+                timeVisible: true,
+                secondsVisible: false,
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+            },
+        });
+
+        priceChartRef.current = priceChart;
+
+        const candleSeries = priceChart.addCandlestickSeries({
+            upColor: '#26a69a',
+            downColor: '#ef5350',
+            borderVisible: false,
+            wickUpColor: '#26a69a',
+            wickDownColor: '#ef5350',
+        });
+
+        const candleData = pulseData.data.map(item => {
+            const direction = item.dominant_direction;
+            const intensity = direction > 0 ? (item.positive_intensity || 0.5) : (item.negative_intensity || 0.5);
+
+            let upColor, downColor, wickColor;
+            if (direction > 0) {
+                const g = Math.round(90 + 165 * intensity);
+                const b = Math.round(102 * intensity);
+                upColor = `rgb(0, ${g}, ${b})`;
+                downColor = `rgb(0, ${Math.max(60, g - 50)}, ${Math.max(0, b - 30)})`;
+                wickColor = upColor;
+            } else if (direction < 0) {
+                const r = Math.round(122 + 133 * intensity);
+                const g = Math.round(26 * intensity);
+                upColor = `rgb(${Math.max(100, r - 50)}, ${g}, ${g})`;
+                downColor = `rgb(${r}, ${g}, ${g})`;
+                wickColor = downColor;
+            } else {
+                upColor = '#6B7280';
+                downColor = '#4B5563';
+                wickColor = '#6B7280';
+            }
+
+            return {
+                time: item.date,
+                open: item.open,
+                high: item.high,
+                low: item.low,
+                close: item.close,
+                color: item.close >= item.open ? upColor : downColor,
+                borderColor: item.close >= item.open ? upColor : downColor,
+                wickColor: wickColor,
+            };
+        });
+
+        candleSeries.setData(candleData);
+
+        // === HISTOGRAM CHART (Bottom) ===
+        const histogramChart = LightweightCharts.createChart(histogramContainerRef.current, {
+            width: histogramContainerRef.current.clientWidth,
+            height: 100, // Taller histogram for details page
+            layout: {
+                background: { type: 'solid', color: 'transparent' },
+                textColor: '#9ca3af',
+            },
+            grid: {
+                vertLines: { color: 'rgba(255, 255, 255, 0.03)' },
+                horzLines: { color: 'rgba(255, 255, 255, 0.03)' },
+            },
+            rightPriceScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+                scaleMargins: { top: 0.1, bottom: 0.1 },
+            },
+            timeScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+                visible: false,
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+            },
+        });
+
+        histogramChartRef.current = histogramChart;
+
+        const histSeries = histogramChart.addHistogramSeries({
+            priceFormat: { type: 'volume' },
+            priceScaleId: '',
+        });
+
+        const histData = pulseData.data.map(item => {
+            const direction = item.dominant_direction;
+            const intensity = direction > 0 ? (item.positive_intensity || 0) : (item.negative_intensity || 0);
+            const value = direction > 0 ? intensity * 20 : (direction < 0 ? -intensity * 20 : 0);
+
+            let color;
+            if (direction > 0) {
+                const g = Math.round(90 + 165 * intensity);
+                const b = Math.round(102 * intensity);
+                color = `rgba(0, ${g}, ${b}, 0.9)`;
+            } else if (direction < 0) {
+                const r = Math.round(122 + 133 * intensity);
+                color = `rgba(${r}, ${Math.round(26 * intensity)}, ${Math.round(26 * intensity)}, 0.9)`;
+            } else {
+                color = 'rgba(107, 114, 128, 0.5)';
+            }
+
+            return { time: item.date, value: value, color: color };
+        });
+
+        histSeries.setData(histData);
+
+        priceChart.timeScale().fitContent();
+        histogramChart.timeScale().fitContent();
+
+        priceChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+            if (range && histogramChartRef.current) {
+                histogramChartRef.current.timeScale().setVisibleRange(range);
+            }
+        });
+
+        const handleResize = () => {
+            if (priceChartContainerRef.current && priceChartRef.current) {
+                priceChartRef.current.applyOptions({ width: priceChartContainerRef.current.clientWidth });
+            }
+            if (histogramContainerRef.current && histogramChartRef.current) {
+                histogramChartRef.current.applyOptions({ width: histogramContainerRef.current.clientWidth });
+            }
+        };
+
+        const resizeObserver = new ResizeObserver(entries => {
+            window.requestAnimationFrame(() => {
+                handleResize();
+            });
+        });
+
+        if (priceChartContainerRef.current) {
+            resizeObserver.observe(priceChartContainerRef.current);
+        }
+
+        return () => {
+            resizeObserver.disconnect();
+            if (priceChartRef.current) {
+                priceChartRef.current.remove();
+                priceChartRef.current = null;
+            }
+            if (histogramChartRef.current) {
+                histogramChartRef.current.remove();
+                histogramChartRef.current = null;
+            }
+        };
+    }, [pulseData]);
+
+    const periods = ['6mo', '1y', '3y', '5y'];
+
+    return (
+        <Card title={`🔮 Mystic Pulse - ${period.toUpperCase()}`}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginBottom: '1rem' }}>
+                {periods.map(p => (
+                    <button
+                        key={p}
+                        onClick={() => setPeriod(p)}
+                        style={{
+                            padding: '4px 12px',
+                            background: period === p ? 'var(--accent-color)' : 'rgba(102, 126, 234, 0.1)',
+                            color: period === p ? 'white' : 'var(--text-primary)',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            fontSize: '0.9rem',
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        {p.toUpperCase()}
+                    </button>
+                ))}
+            </div>
+
+            {loading && (
+                <div style={{ height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+                    Loading {period} data...
+                </div>
+            )}
+
+            {error && !loading && (
+                <div style={{ height: '400px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }}>
+                    Error: {error}
+                </div>
+            )}
+
+            {!loading && !error && pulseData && (
+                <>
+                    <div
+                        ref={priceChartContainerRef}
+                        style={{
+                            width: '100%',
+                            height: '300px',
+                            borderRadius: '8px 8px 0 0',
+                            overflow: 'hidden'
+                        }}
+                    />
+                    <div
+                        ref={histogramContainerRef}
+                        style={{
+                            width: '100%',
+                            height: '100px',
+                            borderRadius: '0 0 8px 8px',
+                            overflow: 'hidden',
+                            borderTop: '1px solid rgba(255,255,255,0.05)'
+                        }}
+                    />
+                </>
+            )}
+        </Card>
+    );
+}
+
+function StockDetailsPage({ watchlist, analyzedStocks, onAddStock, onRemoveStock, onWatchlistChange, onClearAnalysis }) {
+    const [searchQuery, setSearchQuery] = useState('');
+    const [selectedStock, setSelectedStock] = useState(null);
+    const [stockData, setStockData] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    // Initial search or when triggered
+    const handleSearch = async (query) => {
+        if (!query) return;
+        setSearchQuery(query);
+        setLoading(true);
+        setError(null);
+        setStockData(null);
+        setSelectedStock(query.split(',')[0].trim().toUpperCase()); // Take first stock
+
+        try {
+            const response = await fetch('/api/analyze-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tickers: [query.split(',')[0].trim()] })
+            });
+
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.detail || 'Failed to fetch data');
+            }
+            const result = await response.json();
+            if (result && result.length > 0) {
+                setStockData(result[0]);
+            } else {
+                throw new Error('No data found');
+            }
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div style={{ paddingBottom: '3rem' }}>
+            <div style={{ marginBottom: '2rem' }}>
+                <Search
+                    onSearch={handleSearch}
+                    onAddStock={onAddStock} // Optional context
+                    onRemoveStock={onRemoveStock} // Optional context
+                    onWatchlistChange={onWatchlistChange}
+                    onClearAnalysis={onClearAnalysis}
+                    disabled={loading}
+                    addingStock={false}
+                    analyzedStocks={[]} // Not needed for this view specifically
+                    watchlist={watchlist}
+                    placeholder="Search stock for detailed analysis..."
+                />
+            </div>
+
+            {loading && (
+                <div style={{ textAlign: 'center', margin: '3rem' }}>
+                    <div style={{ fontSize: '1.5rem', color: 'var(--accent-color)' }}>Fetching detailed analysis...</div>
+                </div>
+            )}
+
+            {error && (
+                <div style={{ textAlign: 'center', color: 'var(--danger)', margin: '3rem', fontSize: '1.2rem' }}>
+                    Error: {error}
+                </div>
+            )}
+
+            {stockData && !loading && (
+                <div className="animate-fade-in">
+                    <StockAnalysis
+                        data={stockData}
+                        onRefresh={() => handleSearch(stockData.symbol)}
+                        isRefreshing={loading}
+                    />
+                    <div style={{ marginTop: '2rem' }}>
+                        <InteractiveMysticPulseChart
+                            key={`detail-pulse-${stockData.symbol}-${stockData._lastRefreshed || 0}`}
+                            symbol={stockData.symbol}
+                            refreshTrigger={stockData._lastRefreshed}
+                        />
+                    </div>
+                </div>
+            )}
+
+            {!stockData && !loading && !error && (
+                <div style={{ textAlign: 'center', marginTop: '4rem', color: 'var(--text-secondary)' }}>
+                    <h2>🔍 Select a stock to view details</h2>
+                    <p>Use the search bar above to generate a full report.</p>
+                </div>
+            )}
+        </div>
     );
 }
 
