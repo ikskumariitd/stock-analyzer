@@ -2780,6 +2780,8 @@ function StockAnalysis({ data, onRefresh, isRefreshing }) {
 
                 <InteractiveMysticPulseChart key={`pulse-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
+                <SqueezeMomentumCard key={`sqz-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
+
                 <CSPMetricsCard key={`csp-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
                 <Card title="Key Indicators">
@@ -4127,6 +4129,377 @@ function ScrollToTop() {
         >
             ↑
         </button>
+    );
+}
+
+// ============================================
+// Squeeze Momentum Indicator [LazyBear] Component
+// ============================================
+function SqueezeMomentumCard({ symbol, refreshTrigger }) {
+    const [period, setPeriod] = useState('1y'); // Default to 1 year
+    const [sqzData, setSqzData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [hoveredDate, setHoveredDate] = useState(null);
+
+    // Refs for both charts (price + histogram)
+    const priceChartContainerRef = React.useRef(null);
+    const priceChartRef = React.useRef(null);
+    const histogramContainerRef = React.useRef(null);
+    const histogramChartRef = React.useRef(null);
+
+    useEffect(() => {
+        setLoading(true);
+        setError(null);
+        setSqzData(null);
+
+        const needsRefresh = refreshTrigger ? '&refresh=true' : '';
+
+        apiQueue.add(() => fetch(`/api/squeeze-momentum/${symbol}?period=${period}${needsRefresh}`).then(res => {
+            if (!res.ok) throw new Error('Failed to fetch Squeeze Momentum data');
+            return res.json();
+        }))
+            .then(data => {
+                setSqzData(data);
+                setLoading(false);
+            })
+            .catch(err => {
+                setError(err.message);
+                setLoading(false);
+            });
+    }, [symbol, period, refreshTrigger]);
+
+    // Create charts when data is loaded
+    useEffect(() => {
+        if (!sqzData || !sqzData.data || !priceChartContainerRef.current || !histogramContainerRef.current) return;
+
+        // Clean up existing charts
+        if (priceChartRef.current) {
+            priceChartRef.current.remove();
+            priceChartRef.current = null;
+        }
+        if (histogramChartRef.current) {
+            histogramChartRef.current.remove();
+            histogramChartRef.current = null;
+        }
+
+        // === PRICE CHART (Top - Candlestick) ===
+        const priceChart = LightweightCharts.createChart(priceChartContainerRef.current, {
+            width: priceChartContainerRef.current.clientWidth,
+            height: 200,
+            layout: {
+                background: { type: 'solid', color: 'transparent' },
+                textColor: '#9ca3af',
+            },
+            grid: {
+                vertLines: { color: 'rgba(255, 255, 255, 0.03)' },
+                horzLines: { color: 'rgba(255, 255, 255, 0.03)' },
+            },
+            rightPriceScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+            },
+            timeScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+                visible: true,
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+            },
+        });
+
+        priceChartRef.current = priceChart;
+
+        // Add candlestick series
+        const candleSeries = priceChart.addCandlestickSeries({
+            upColor: '#26a69a',
+            downColor: '#ef5350',
+            borderVisible: false,
+            wickUpColor: '#26a69a',
+            wickDownColor: '#ef5350',
+        });
+
+        // Prepare candlestick data
+        const candleData = sqzData.data
+            .filter(item => item.open && item.high && item.low && item.close)
+            .map(item => ({
+                time: item.date,
+                open: item.open,
+                high: item.high,
+                low: item.low,
+                close: item.close
+            }));
+
+        candleSeries.setData(candleData);
+
+        // === HISTOGRAM CHART (Bottom) ===
+        const histogramChart = LightweightCharts.createChart(histogramContainerRef.current, {
+            width: histogramContainerRef.current.clientWidth,
+            height: 100,
+            layout: {
+                background: { type: 'solid', color: 'transparent' },
+                textColor: '#9ca3af',
+            },
+            grid: {
+                vertLines: { color: 'rgba(255, 255, 255, 0.03)' },
+                horzLines: { color: 'rgba(255, 255, 255, 0.03)' },
+            },
+            rightPriceScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+            },
+            timeScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+                visible: false, // Hide time scale on histogram (synced with price chart)
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+            },
+        });
+
+        histogramChartRef.current = histogramChart;
+
+        // Add histogram series for momentum values
+        const histSeries = histogramChart.addHistogramSeries({
+            priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
+            priceScaleId: '',
+        });
+
+        // Prepare histogram data with correct colors
+        const histData = sqzData.data.map(item => ({
+            time: item.date,
+            value: item.value || 0,
+            color: item.color || '#808080'
+        }));
+
+        histSeries.setData(histData);
+
+        // Sync time scales between charts
+        priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+            if (range) {
+                histogramChart.timeScale().setVisibleLogicalRange(range);
+            }
+        });
+        histogramChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+            if (range) {
+                priceChart.timeScale().setVisibleLogicalRange(range);
+            }
+        });
+
+        // Sync crosshairs
+        priceChart.subscribeCrosshairMove((param) => {
+            if (param.time) {
+                histogramChart.setCrosshairPosition(param.point?.x || 0, param.time, histSeries);
+            } else {
+                histogramChart.clearCrosshairPosition();
+            }
+        });
+        histogramChart.subscribeCrosshairMove((param) => {
+            if (param.time) {
+                priceChart.setCrosshairPosition(param.point?.x || 0, param.time, candleSeries);
+                const dateStr = typeof param.time === 'string' ? param.time :
+                    new Date(param.time * 1000).toISOString().split('T')[0];
+                setHoveredDate(dateStr);
+            } else {
+                priceChart.clearCrosshairPosition();
+                setHoveredDate(null);
+            }
+        });
+
+        priceChart.timeScale().fitContent();
+        histogramChart.timeScale().fitContent();
+
+        // Handle resize
+        const handleResize = () => {
+            if (priceChartContainerRef.current && priceChartRef.current) {
+                priceChartRef.current.applyOptions({ width: priceChartContainerRef.current.clientWidth });
+            }
+            if (histogramContainerRef.current && histogramChartRef.current) {
+                histogramChartRef.current.applyOptions({ width: histogramContainerRef.current.clientWidth });
+            }
+        };
+
+        const resizeObserver = new ResizeObserver(entries => {
+            window.requestAnimationFrame(() => {
+                handleResize();
+            });
+        });
+
+        if (priceChartContainerRef.current) {
+            resizeObserver.observe(priceChartContainerRef.current);
+        }
+
+        return () => {
+            resizeObserver.disconnect();
+            if (priceChartRef.current) {
+                priceChartRef.current.remove();
+                priceChartRef.current = null;
+            }
+            if (histogramChartRef.current) {
+                histogramChartRef.current.remove();
+                histogramChartRef.current = null;
+            }
+        };
+    }, [sqzData]);
+
+    const periods = ['6mo', '1y', '3y', '5y'];
+
+    // Get squeeze state info
+    const getSqueezeInfo = () => {
+        if (!sqzData || !sqzData.summary) return null;
+        const summary = sqzData.summary;
+        return {
+            squeezeOn: summary.squeeze_on,
+            squeezeOff: summary.squeeze_off,
+            trend: summary.trend,
+            direction: summary.direction,
+            text: summary.squeeze_text || 'Loading...',
+            momentum: summary.momentum || 0,
+            color: summary.color
+        };
+    };
+
+    const squeezeInfo = getSqueezeInfo();
+
+    return (
+        <Card title={`📊 Squeeze Momentum - ${period.toUpperCase()}`}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginBottom: '1rem' }}>
+                {periods.map(p => (
+                    <button
+                        key={p}
+                        onClick={() => setPeriod(p)}
+                        style={{
+                            padding: '4px 12px',
+                            background: period === p ? 'var(--accent-color)' : 'rgba(102, 126, 234, 0.1)',
+                            color: period === p ? 'white' : 'var(--text-primary)',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            fontSize: '0.9rem',
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        {p.toUpperCase()}
+                    </button>
+                ))}
+            </div>
+
+            {loading && (
+                <div style={{ height: '350px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+                    Analyzing squeeze momentum...
+                </div>
+            )}
+
+            {error && !loading && (
+                <div style={{ height: '350px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }}>
+                    Error: {error}
+                </div>
+            )}
+
+            {!loading && !error && sqzData && (
+                <>
+                    {/* Price Chart (Candlestick) */}
+                    <div
+                        ref={priceChartContainerRef}
+                        style={{
+                            width: '100%',
+                            height: '200px',
+                            borderRadius: '8px',
+                            overflow: 'hidden'
+                        }}
+                    />
+
+                    {/* Histogram Chart */}
+                    <div style={{ position: 'relative' }}>
+                        <div
+                            ref={histogramContainerRef}
+                            style={{
+                                width: '100%',
+                                height: '100px',
+                                borderRadius: '8px',
+                                overflow: 'hidden'
+                            }}
+                        />
+                        {hoveredDate && (
+                            <div style={{
+                                position: 'absolute',
+                                bottom: '4px',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                background: 'rgba(0, 0, 0, 0.75)',
+                                color: '#fff',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '0.75rem',
+                                fontWeight: 500,
+                                pointerEvents: 'none',
+                                zIndex: 10
+                            }}>
+                                {hoveredDate}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Squeeze State Indicator */}
+                    {squeezeInfo && (
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '0.75rem',
+                            marginTop: '0.75rem',
+                            background: squeezeInfo.squeezeOn
+                                ? 'linear-gradient(135deg, rgba(220, 38, 38, 0.15), rgba(220, 38, 38, 0.05))'
+                                : squeezeInfo.squeezeOff
+                                    ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(34, 197, 94, 0.05))'
+                                    : 'linear-gradient(135deg, rgba(128, 128, 128, 0.15), rgba(128, 128, 128, 0.05))',
+                            border: `1px solid ${squeezeInfo.squeezeOn ? 'rgba(220, 38, 38, 0.3)' : squeezeInfo.squeezeOff ? 'rgba(34, 197, 94, 0.3)' : 'rgba(128, 128, 128, 0.3)'}`,
+                            borderRadius: '8px'
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <span style={{ fontSize: '1.2rem' }}>
+                                    {squeezeInfo.squeezeOn ? '🔴' : squeezeInfo.squeezeOff ? '🟢' : '⚪'}
+                                </span>
+                                <div>
+                                    <div style={{
+                                        fontSize: '0.9rem',
+                                        fontWeight: 600,
+                                        color: squeezeInfo.squeezeOn ? '#dc2626' : squeezeInfo.squeezeOff ? '#22c55e' : 'var(--text-secondary)'
+                                    }}>
+                                        {squeezeInfo.squeezeOn ? 'Squeeze ON' : squeezeInfo.squeezeOff ? 'Squeeze Released' : 'No Squeeze'}
+                                    </div>
+                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                                        {squeezeInfo.squeezeOn ? 'Building pressure' : squeezeInfo.squeezeOff ? 'Breakout potential' : 'Neutral state'}
+                                    </div>
+                                </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Momentum</div>
+                                    <div style={{
+                                        fontSize: '0.9rem',
+                                        fontWeight: 700,
+                                        color: squeezeInfo.momentum > 0 ? '#22c55e' : squeezeInfo.momentum < 0 ? '#dc2626' : 'var(--text-secondary)'
+                                    }}>
+                                        {squeezeInfo.momentum?.toFixed(2) || '0.00'}
+                                    </div>
+                                </div>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>Trend</div>
+                                    <div style={{
+                                        fontSize: '0.9rem',
+                                        fontWeight: 700,
+                                        color: squeezeInfo.trend === 'bullish' ? '#22c55e' : '#dc2626',
+                                        textTransform: 'capitalize'
+                                    }}>
+                                        {squeezeInfo.trend || 'N/A'}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </>
+            )}
+        </Card>
     );
 }
 

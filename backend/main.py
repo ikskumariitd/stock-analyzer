@@ -1565,6 +1565,163 @@ async def get_mystic_pulse(ticker: str, period: str = "1y", adx_length: int = 9,
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================
+# Squeeze Momentum Indicator Endpoint
+# ============================================
+from squeeze_momentum import calculate_squeeze_momentum, get_squeeze_momentum_summary
+
+@app.get("/api/squeeze-momentum/{ticker}")
+async def get_squeeze_momentum(ticker: str, period: str = "1y", refresh: bool = False):
+    """
+    Get Squeeze Momentum Indicator data for a stock.
+    
+    Parameters:
+    - ticker: Stock symbol (e.g., AAPL)
+    - period: History period to return (default: 1y). Options: 6mo, 1y, 3y, 5y
+    - refresh: Force fresh data fetch, bypassing cache (default: false)
+    
+    Returns histogram data with squeeze states for visualization.
+    """
+    import math
+    from datetime import datetime, timedelta
+    
+    def sanitize(val):
+        if val is None:
+            return None
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return None
+        return round(val, 4) if isinstance(val, float) else val
+    
+    # Period to days mapping
+    period_days = {
+        "6mo": 180,
+        "1y": 365,
+        "3y": 1095,
+        "5y": 1825,
+    }
+    
+    try:
+        ticker = ticker.upper().strip()
+        cache_key = f"sqzmom:{ticker}"
+        
+        full_data = None
+        
+        # Check cache first (unless refresh requested)
+        if not refresh:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                full_data = cached.get("full_data", [])
+                # Check if cached data has OHLC (added in latest update)
+                # If not, force refresh to get complete data
+                if full_data and len(full_data) > 0:
+                    sample = full_data[0]
+                    if "open" not in sample or sample.get("open") is None:
+                        full_data = None  # Force refresh
+        
+        # Fetch and calculate fresh data if needed
+        if full_data is None or refresh:
+            stock = yf.Ticker(ticker)
+            # Fetch 10y for full data
+            hist = stock.history(period="10y")
+            
+            if hist.empty or len(hist) < 30:
+                raise HTTPException(status_code=400, detail=f"Insufficient data for {ticker}")
+            
+            # Calculate Squeeze Momentum
+            sqz_df = calculate_squeeze_momentum(hist)
+            
+            # Prepare full data points (including OHLC for price chart)
+            full_data = []
+            for date, row in sqz_df.iterrows():
+                full_data.append({
+                    "date": date.strftime("%Y-%m-%d"),
+                    "open": sanitize(row.get("Open")),
+                    "high": sanitize(row.get("High")),
+                    "low": sanitize(row.get("Low")),
+                    "close": sanitize(row.get("Close")),
+                    "value": sanitize(row.get("momentum", 0)),
+                    "squeeze_on": bool(row.get("squeeze_on", False)),
+                    "squeeze_off": bool(row.get("squeeze_off", False)),
+                    "color": row.get("color", "#808080"),
+                    "squeeze_color": row.get("squeeze_color", "#808080")
+                })
+            
+            # Cache the full data
+            cache.set(cache_key, {"full_data": full_data})
+        
+        # Filter data based on requested period
+        days = period_days.get(period, 365)  # Default to 1y
+        cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        filtered_data = [d for d in full_data if d["date"] >= cutoff_date]
+        
+        # Generate summary from filtered data
+        if filtered_data:
+            last = filtered_data[-1]
+            prev = filtered_data[-2] if len(filtered_data) > 1 else last
+            
+            momentum = last.get("value", 0)
+            prev_momentum = prev.get("value", 0)
+            squeeze_on = last.get("squeeze_on", False)
+            squeeze_off = last.get("squeeze_off", False)
+            
+            # Determine trend
+            if momentum > 0:
+                if momentum > prev_momentum:
+                    direction = "bullish_strengthening"
+                    trend = "bullish"
+                else:
+                    direction = "bullish_weakening"
+                    trend = "bullish"
+            else:
+                if momentum < prev_momentum:
+                    direction = "bearish_strengthening"
+                    trend = "bearish"
+                else:
+                    direction = "bearish_weakening"
+                    trend = "bearish"
+            
+            # Squeeze state
+            if squeeze_on:
+                squeeze_state = "squeeze_on"
+                squeeze_text = "🔴 Squeeze ON - Building pressure"
+            elif squeeze_off:
+                squeeze_state = "squeeze_off"
+                squeeze_text = "🟢 Squeeze Released - Breakout potential"
+            else:
+                squeeze_state = "neutral"
+                squeeze_text = "⚪ No squeeze detected"
+            
+            summary = {
+                "trend": trend,
+                "direction": direction,
+                "momentum": round(float(momentum), 4),
+                "squeeze_on": squeeze_on,
+                "squeeze_off": squeeze_off,
+                "squeeze_state": squeeze_state,
+                "squeeze_text": squeeze_text,
+                "color": last.get("color", "#808080")
+            }
+        else:
+            summary = {"error": "No data available"}
+        
+        # Check if this was from cache
+        is_cached = not refresh and cache.get(cache_key) is not None
+        
+        return {
+            "symbol": ticker,
+            "period": period,
+            "data": filtered_data,
+            "summary": summary,
+            "_cached": is_cached
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Squeeze Momentum error for {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/market-news")
 async def get_market_news(tickers: str = ""):
     """
