@@ -2701,7 +2701,14 @@ function StockAnalysis({ data, onRefresh, isRefreshing }) {
         <div className="stock-grid-item" id={`stock-${data.symbol}`}>
             <div className="header-row">
                 <div>
-                    <h2 style={{ fontSize: '1.8rem', fontWeight: 700, margin: 0 }}>{data.symbol}</h2>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem' }}>
+                        <h2 style={{ fontSize: '1.8rem', fontWeight: 700, margin: 0 }}>{data.symbol}</h2>
+                        {data.name && data.name !== data.symbol && (
+                            <span style={{ fontSize: '1rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
+                                {data.name}
+                            </span>
+                        )}
+                    </div>
                     <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Real-time Analysis</div>
                 </div>
                 <div className="price-display" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '1rem' }}>
