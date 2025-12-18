@@ -4351,29 +4351,95 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
                 </div>
             )}
 
-            {!loading && !error && pulseData && (
-                <>
-                    <div
-                        ref={priceChartContainerRef}
-                        style={{
-                            width: '100%',
-                            height: '300px',
-                            borderRadius: '8px 8px 0 0',
-                            overflow: 'hidden'
-                        }}
-                    />
-                    <div
-                        ref={histogramContainerRef}
-                        style={{
-                            width: '100%',
-                            height: '100px',
-                            borderRadius: '0 0 8px 8px',
-                            overflow: 'hidden',
-                            borderTop: '1px solid rgba(255,255,255,0.05)'
-                        }}
-                    />
-                </>
-            )}
+            {!loading && !error && pulseData && (() => {
+                const summary = pulseData.summary;
+
+                // Get trend colors
+                const getTrendColor = (trend, strength) => {
+                    if (trend === 'bullish') {
+                        const intensity = Math.min(strength, 1);
+                        return `rgb(${Math.round(0)}, ${Math.round(90 + 165 * intensity)}, ${Math.round(0 + 102 * intensity)})`;
+                    } else if (trend === 'bearish') {
+                        const intensity = Math.min(strength, 1);
+                        return `rgb(${Math.round(122 + 133 * intensity)}, ${Math.round(0 + 26 * intensity)}, ${Math.round(0 + 26 * intensity)})`;
+                    }
+                    return 'rgb(128, 128, 128)';
+                };
+
+                const trendColor = summary ? getTrendColor(summary.trend, summary.strength) : 'rgb(128, 128, 128)';
+                const trendEmoji = summary?.trend === 'bullish' ? '🟢' : summary?.trend === 'bearish' ? '🔴' : '⚪';
+
+                return (
+                    <>
+                        <div
+                            ref={priceChartContainerRef}
+                            style={{
+                                width: '100%',
+                                height: '300px',
+                                borderRadius: '8px 8px 0 0',
+                                overflow: 'hidden'
+                            }}
+                        />
+                        <div
+                            ref={histogramContainerRef}
+                            style={{
+                                width: '100%',
+                                height: '100px',
+                                borderRadius: '0 0 8px 8px',
+                                overflow: 'hidden',
+                                borderTop: '1px solid rgba(255,255,255,0.05)'
+                            }}
+                        />
+
+                        {/* Trend Summary Row */}
+                        {summary && (
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '0.75rem',
+                                marginTop: '0.75rem',
+                                background: `linear-gradient(135deg, ${trendColor}22, ${trendColor}11)`,
+                                border: `1px solid ${trendColor}44`,
+                                borderRadius: '8px'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <span style={{ fontSize: '1.5rem' }}>{trendEmoji}</span>
+                                    <div>
+                                        <div style={{
+                                            fontSize: '1rem',
+                                            fontWeight: 700,
+                                            color: trendColor,
+                                            textTransform: 'capitalize'
+                                        }}>
+                                            {summary.trend}
+                                        </div>
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                            {summary.momentum === 'strengthening' ? '📈' : summary.momentum === 'weakening' ? '📉' : '➡️'} {summary.momentum}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                                    <div style={{ textAlign: 'center' }}>
+                                        <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>+DI</div>
+                                        <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#00FF66' }}>{summary.di_plus}</div>
+                                    </div>
+                                    <div style={{ textAlign: 'center' }}>
+                                        <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>-DI</div>
+                                        <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#FF1A1A' }}>{summary.di_minus}</div>
+                                    </div>
+                                    <div style={{ textAlign: 'center' }}>
+                                        <div style={{ fontSize: '1.2rem', fontWeight: 700, color: trendColor }}>
+                                            {(summary.strength * 100).toFixed(0)}%
+                                        </div>
+                                        <div style={{ fontSize: '0.6rem', color: 'var(--text-secondary)' }}>Strength</div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </>
+                );
+            })()}
         </Card>
     );
 }
