@@ -2778,7 +2778,7 @@ function StockAnalysis({ data, onRefresh, isRefreshing }) {
 
                 <VolatilityCard key={`vol-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
-                <MysticPulseCard key={`pulse-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
+                <InteractiveMysticPulseChart key={`pulse-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
                 <CSPMetricsCard key={`csp-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
@@ -3708,6 +3708,7 @@ function MysticPulseCard({ symbol, refreshTrigger }) {
     const [pulseData, setPulseData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [hoveredDate, setHoveredDate] = useState(null);
 
     // Refs for price chart (top)
     const priceChartContainerRef = React.useRef(null);
@@ -3885,6 +3886,18 @@ function MysticPulseCard({ symbol, refreshTrigger }) {
 
         histSeries.setData(histData);
 
+        // Subscribe to crosshair move for date tooltip on histogram
+        histogramChart.subscribeCrosshairMove((param) => {
+            if (param.time) {
+                // Format date from timestamp (YYYY-MM-DD)
+                const dateStr = typeof param.time === 'string' ? param.time :
+                    new Date(param.time * 1000).toISOString().split('T')[0];
+                setHoveredDate(dateStr);
+            } else {
+                setHoveredDate(null);
+            }
+        });
+
         // Sync time scales
         priceChart.timeScale().fitContent();
         histogramChart.timeScale().fitContent();
@@ -3981,16 +3994,36 @@ function MysticPulseCard({ symbol, refreshTrigger }) {
             />
 
             {/* Histogram Chart (Bottom) */}
-            <div
-                ref={histogramContainerRef}
-                style={{
-                    width: '100%',
-                    height: '80px',
-                    borderRadius: '0 0 8px 8px',
-                    overflow: 'hidden',
-                    borderTop: '1px solid rgba(255,255,255,0.05)'
-                }}
-            />
+            <div style={{ position: 'relative' }}>
+                <div
+                    ref={histogramContainerRef}
+                    style={{
+                        width: '100%',
+                        height: '80px',
+                        borderRadius: '0 0 8px 8px',
+                        overflow: 'hidden',
+                        borderTop: '1px solid rgba(255,255,255,0.05)'
+                    }}
+                />
+                {hoveredDate && (
+                    <div style={{
+                        position: 'absolute',
+                        bottom: '4px',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        background: 'rgba(0, 0, 0, 0.75)',
+                        color: '#fff',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        fontSize: '0.7rem',
+                        fontWeight: 500,
+                        pointerEvents: 'none',
+                        zIndex: 10
+                    }}>
+                        {hoveredDate}
+                    </div>
+                )}
+            </div>
 
             {/* Trend Summary Row */}
             <div style={{
@@ -4099,10 +4132,11 @@ function ScrollToTop() {
 
 // Interactive Mystic Pulse Chart with Date Range Selection
 function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
-    const [period, setPeriod] = useState('3y'); // Default to 3 years
+    const [period, setPeriod] = useState('1y'); // Default to 1 year
     const [pulseData, setPulseData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [hoveredDate, setHoveredDate] = useState(null);
 
     // Refs for charts
     const priceChartContainerRef = React.useRef(null);
@@ -4272,6 +4306,17 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
 
         histSeries.setData(histData);
 
+        // Subscribe to crosshair move for date tooltip on histogram
+        histogramChart.subscribeCrosshairMove((param) => {
+            if (param.time) {
+                const dateStr = typeof param.time === 'string' ? param.time :
+                    new Date(param.time * 1000).toISOString().split('T')[0];
+                setHoveredDate(dateStr);
+            } else {
+                setHoveredDate(null);
+            }
+        });
+
         priceChart.timeScale().fitContent();
         histogramChart.timeScale().fitContent();
 
@@ -4380,16 +4425,36 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
                                 overflow: 'hidden'
                             }}
                         />
-                        <div
-                            ref={histogramContainerRef}
-                            style={{
-                                width: '100%',
-                                height: '100px',
-                                borderRadius: '0 0 8px 8px',
-                                overflow: 'hidden',
-                                borderTop: '1px solid rgba(255,255,255,0.05)'
-                            }}
-                        />
+                        <div style={{ position: 'relative' }}>
+                            <div
+                                ref={histogramContainerRef}
+                                style={{
+                                    width: '100%',
+                                    height: '100px',
+                                    borderRadius: '0 0 8px 8px',
+                                    overflow: 'hidden',
+                                    borderTop: '1px solid rgba(255,255,255,0.05)'
+                                }}
+                            />
+                            {hoveredDate && (
+                                <div style={{
+                                    position: 'absolute',
+                                    bottom: '4px',
+                                    left: '50%',
+                                    transform: 'translateX(-50%)',
+                                    background: 'rgba(0, 0, 0, 0.75)',
+                                    color: '#fff',
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 500,
+                                    pointerEvents: 'none',
+                                    zIndex: 10
+                                }}>
+                                    {hoveredDate}
+                                </div>
+                            )}
+                        </div>
 
                         {/* Trend Summary Row */}
                         {summary && (
