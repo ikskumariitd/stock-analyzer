@@ -3745,13 +3745,9 @@ function MysticPulseCard({ symbol, refreshTrigger }) {
     const [error, setError] = useState(null);
     const [hoveredDate, setHoveredDate] = useState(null);
 
-    // Refs for price chart (top)
-    const priceChartContainerRef = React.useRef(null);
-    const priceChartRef = React.useRef(null);
-
-    // Refs for histogram chart (bottom)
-    const histogramContainerRef = React.useRef(null);
-    const histogramChartRef = React.useRef(null);
+    // Single ref for the merged chart
+    const chartContainerRef = React.useRef(null);
+    const chartRef = React.useRef(null);
 
     useEffect(() => {
         setLoading(true);
@@ -3776,22 +3772,18 @@ function MysticPulseCard({ symbol, refreshTrigger }) {
 
     // Create charts when data is loaded
     useEffect(() => {
-        if (!pulseData || !pulseData.data || !priceChartContainerRef.current || !histogramContainerRef.current) return;
+        if (!pulseData || !pulseData.data || !chartContainerRef.current) return;
 
         // Clean up existing charts
-        if (priceChartRef.current) {
-            priceChartRef.current.remove();
-            priceChartRef.current = null;
-        }
-        if (histogramChartRef.current) {
-            histogramChartRef.current.remove();
-            histogramChartRef.current = null;
+        if (chartRef.current) {
+            chartRef.current.remove();
+            chartRef.current = null;
         }
 
-        // === PRICE CHART (Top) ===
-        const priceChart = LightweightCharts.createChart(priceChartContainerRef.current, {
-            width: priceChartContainerRef.current.clientWidth,
-            height: 200,
+        // === MERGED CHART ===
+        const chart = LightweightCharts.createChart(chartContainerRef.current, {
+            width: chartContainerRef.current.clientWidth,
+            height: 300,
             layout: {
                 background: { type: 'solid', color: 'transparent' },
                 textColor: '#9ca3af',
@@ -3802,6 +3794,10 @@ function MysticPulseCard({ symbol, refreshTrigger }) {
             },
             rightPriceScale: {
                 borderColor: 'rgba(255, 255, 255, 0.1)',
+                scaleMargins: {
+                    top: 0.05,
+                    bottom: 0.3, // Leave space for histogram
+                },
             },
             timeScale: {
                 borderColor: 'rgba(255, 255, 255, 0.1)',
@@ -3813,10 +3809,10 @@ function MysticPulseCard({ symbol, refreshTrigger }) {
             },
         });
 
-        priceChartRef.current = priceChart;
+        chartRef.current = chart;
 
         // Add candlestick series with custom colors based on Mystic Pulse
-        const candleSeries = priceChart.addCandlestickSeries({
+        const candleSeries = chart.addCandlestickSeries({
             upColor: '#26a69a',
             downColor: '#ef5350',
             borderVisible: false,
@@ -3865,64 +3861,52 @@ function MysticPulseCard({ symbol, refreshTrigger }) {
 
         candleSeries.setData(candleData);
 
-        // === HISTOGRAM CHART (Bottom) ===
-        const histogramChart = LightweightCharts.createChart(histogramContainerRef.current, {
-            width: histogramContainerRef.current.clientWidth,
-            height: 80,
-            layout: {
-                background: { type: 'solid', color: 'transparent' },
-                textColor: '#9ca3af',
-            },
-            grid: {
-                vertLines: { color: 'rgba(255, 255, 255, 0.03)' },
-                horzLines: { color: 'rgba(255, 255, 255, 0.03)' },
-            },
-            rightPriceScale: {
-                borderColor: 'rgba(255, 255, 255, 0.1)',
-                scaleMargins: { top: 0.1, bottom: 0.1 },
-            },
-            timeScale: {
-                borderColor: 'rgba(255, 255, 255, 0.1)',
-                visible: false, // Hide time scale on histogram (synced with price chart)
-            },
-            crosshair: {
-                mode: LightweightCharts.CrosshairMode.Normal,
+        // Add Histogram Series on secondary scale
+        const histogramSeries = chart.addHistogramSeries({
+            priceScaleId: 'histogram-scale',
+            priceFormat: {
+                type: 'volume',
             },
         });
 
-        histogramChartRef.current = histogramChart;
-
-        // Add histogram series
-        const histSeries = histogramChart.addHistogramSeries({
-            priceFormat: { type: 'volume' },
-            priceScaleId: '',
+        // Configure the custom scale for histogram - Bottom 25%
+        chart.priceScale('histogram-scale').applyOptions({
+            scaleMargins: {
+                top: 0.75, // Push to bottom
+                bottom: 0,
+            },
         });
 
-        // Prepare histogram data
-        const histData = pulseData.data.map(item => {
+        const histogramData = pulseData.data.map(item => {
             const direction = item.dominant_direction;
-            const intensity = direction > 0 ? (item.positive_intensity || 0) : (item.negative_intensity || 0);
-            const value = direction > 0 ? intensity * 20 : (direction < 0 ? -intensity * 20 : 0);
+            const intensity = direction > 0 ? (item.positive_intensity || 0.5) : (item.negative_intensity || 0.5);
 
             let color;
             if (direction > 0) {
                 const g = Math.round(90 + 165 * intensity);
                 const b = Math.round(102 * intensity);
-                color = `rgba(0, ${g}, ${b}, 0.9)`;
+                color = `rgba(0, ${g}, ${b}, 0.8)`;
             } else if (direction < 0) {
                 const r = Math.round(122 + 133 * intensity);
-                color = `rgba(${r}, ${Math.round(26 * intensity)}, ${Math.round(26 * intensity)}, 0.9)`;
+                const g = Math.round(26 * intensity);
+                color = `rgba(${r}, ${g}, ${g}, 0.8)`;
             } else {
                 color = 'rgba(107, 114, 128, 0.5)';
             }
 
-            return { time: item.date, value: value, color: color };
+            const value = direction > 0 ? intensity * 20 : (direction < 0 ? -intensity * 20 : 0);
+
+            return {
+                time: item.date,
+                value: value,
+                color: color
+            };
         });
 
-        histSeries.setData(histData);
+        histogramSeries.setData(histogramData);
 
-        // Subscribe to crosshair move for date tooltip on histogram
-        histogramChart.subscribeCrosshairMove((param) => {
+        // Crosshair handler for date
+        chart.subscribeCrosshairMove(param => {
             if (param.time) {
                 // Format date from timestamp (YYYY-MM-DD)
                 const dateStr = typeof param.time === 'string' ? param.time :
@@ -3933,48 +3917,24 @@ function MysticPulseCard({ symbol, refreshTrigger }) {
             }
         });
 
-        // Sync time scales
-        priceChart.timeScale().fitContent();
-        histogramChart.timeScale().fitContent();
+        // Fit content
+        chart.timeScale().fitContent();
 
-        // Sync visible range
-        priceChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-            if (range && histogramChartRef.current) {
-                histogramChartRef.current.timeScale().setVisibleRange(range);
-            }
-        });
-
-        // Handle resize
+        // Handle Resize
         const handleResize = () => {
-            if (priceChartContainerRef.current && priceChartRef.current) {
-                priceChartRef.current.applyOptions({ width: priceChartContainerRef.current.clientWidth });
-            }
-            if (histogramContainerRef.current && histogramChartRef.current) {
-                histogramChartRef.current.applyOptions({ width: histogramContainerRef.current.clientWidth });
+            if (chartContainerRef.current) {
+                chart.applyOptions({ width: chartContainerRef.current.clientWidth });
             }
         };
 
         const resizeObserver = new ResizeObserver(entries => {
-            // Wrap in requestAnimationFrame to avoid "ResizeObserver loop limit exceeded"
-            window.requestAnimationFrame(() => {
-                handleResize();
-            });
+            window.requestAnimationFrame(() => handleResize());
         });
-
-        if (priceChartContainerRef.current) {
-            resizeObserver.observe(priceChartContainerRef.current);
-        }
+        resizeObserver.observe(chartContainerRef.current);
 
         return () => {
             resizeObserver.disconnect();
-            if (priceChartRef.current) {
-                priceChartRef.current.remove();
-                priceChartRef.current = null;
-            }
-            if (histogramChartRef.current) {
-                histogramChartRef.current.remove();
-                histogramChartRef.current = null;
-            }
+            chart.remove();
         };
     }, [pulseData]);
 
@@ -4017,33 +3977,21 @@ function MysticPulseCard({ symbol, refreshTrigger }) {
 
     return (
         <Card title="🔮 Mystic Pulse v2.0">
-            {/* Price Candlestick Chart (Top) */}
-            <div
-                ref={priceChartContainerRef}
-                style={{
-                    width: '100%',
-                    height: '200px',
-                    borderRadius: '8px 8px 0 0',
-                    overflow: 'hidden'
-                }}
-            />
-
-            {/* Histogram Chart (Bottom) */}
+            {/* Merged Chart */}
             <div style={{ position: 'relative' }}>
                 <div
-                    ref={histogramContainerRef}
+                    ref={chartContainerRef}
                     style={{
                         width: '100%',
-                        height: '80px',
-                        borderRadius: '0 0 8px 8px',
-                        overflow: 'hidden',
-                        borderTop: '1px solid rgba(255,255,255,0.05)'
+                        height: '300px',
+                        borderRadius: '8px',
+                        overflow: 'hidden'
                     }}
                 />
                 {hoveredDate && (
                     <div style={{
                         position: 'absolute',
-                        bottom: '4px',
+                        bottom: '90px', // Adjusted to be above histogram
                         left: '50%',
                         transform: 'translateX(-50%)',
                         background: 'rgba(0, 0, 0, 0.75)',
@@ -4544,11 +4492,9 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
     const [error, setError] = useState(null);
     const [hoveredDate, setHoveredDate] = useState(null);
 
-    // Refs for charts
-    const priceChartContainerRef = React.useRef(null);
-    const priceChartRef = React.useRef(null);
-    const histogramContainerRef = React.useRef(null);
-    const histogramChartRef = React.useRef(null);
+    // Single ref for the merged chart
+    const chartContainerRef = React.useRef(null);
+    const chartRef = React.useRef(null);
 
     useEffect(() => {
         setLoading(true);
@@ -4572,24 +4518,20 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
             });
     }, [symbol, period, refreshTrigger]);
 
-    // Create charts when data is loaded (Reusing logic from MysticPulseCard but adapted)
+    // Create charts when data is loaded
     useEffect(() => {
-        if (!pulseData || !pulseData.data || !priceChartContainerRef.current || !histogramContainerRef.current) return;
+        if (!pulseData || !pulseData.data || !chartContainerRef.current) return;
 
         // Clean up existing charts
-        if (priceChartRef.current) {
-            priceChartRef.current.remove();
-            priceChartRef.current = null;
-        }
-        if (histogramChartRef.current) {
-            histogramChartRef.current.remove();
-            histogramChartRef.current = null;
+        if (chartRef.current) {
+            chartRef.current.remove();
+            chartRef.current = null;
         }
 
-        // === PRICE CHART (Top) ===
-        const priceChart = LightweightCharts.createChart(priceChartContainerRef.current, {
-            width: priceChartContainerRef.current.clientWidth,
-            height: 300, // Taller chart for details page
+        // === MERGED CHART ===
+        const chart = LightweightCharts.createChart(chartContainerRef.current, {
+            width: chartContainerRef.current.clientWidth,
+            height: 400, // Combined height
             layout: {
                 background: { type: 'solid', color: 'transparent' },
                 textColor: '#9ca3af',
@@ -4598,8 +4540,13 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
                 vertLines: { color: 'rgba(255, 255, 255, 0.03)' },
                 horzLines: { color: 'rgba(255, 255, 255, 0.03)' },
             },
+            // Main Price Scale (Candles) - Top 70%
             rightPriceScale: {
                 borderColor: 'rgba(255, 255, 255, 0.1)',
+                scaleMargins: {
+                    top: 0.05,
+                    bottom: 0.3, // Leave space for histogram
+                },
             },
             timeScale: {
                 borderColor: 'rgba(255, 255, 255, 0.1)',
@@ -4611,9 +4558,10 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
             },
         });
 
-        priceChartRef.current = priceChart;
+        chartRef.current = chart;
 
-        const candleSeries = priceChart.addCandlestickSeries({
+        // === CANDLESTICK SERIES ===
+        const candleSeries = chart.addCandlestickSeries({
             upColor: '#26a69a',
             downColor: '#ef5350',
             borderVisible: false,
@@ -4658,63 +4606,54 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
 
         candleSeries.setData(candleData);
 
-        // === HISTOGRAM CHART (Bottom) ===
-        const histogramChart = LightweightCharts.createChart(histogramContainerRef.current, {
-            width: histogramContainerRef.current.clientWidth,
-            height: 100, // Taller histogram for details page
-            layout: {
-                background: { type: 'solid', color: 'transparent' },
-                textColor: '#9ca3af',
-            },
-            grid: {
-                vertLines: { color: 'rgba(255, 255, 255, 0.03)' },
-                horzLines: { color: 'rgba(255, 255, 255, 0.03)' },
-            },
-            rightPriceScale: {
-                borderColor: 'rgba(255, 255, 255, 0.1)',
-                scaleMargins: { top: 0.1, bottom: 0.1 },
-            },
-            timeScale: {
-                borderColor: 'rgba(255, 255, 255, 0.1)',
-                visible: false,
-            },
-            crosshair: {
-                mode: LightweightCharts.CrosshairMode.Normal,
+        // === HISTOGRAM SERIES ===
+        const histogramSeries = chart.addHistogramSeries({
+            priceScaleId: 'histogram-scale',
+            priceFormat: {
+                type: 'volume',
             },
         });
 
-        histogramChartRef.current = histogramChart;
-
-        const histSeries = histogramChart.addHistogramSeries({
-            priceFormat: { type: 'volume' },
-            priceScaleId: '',
+        // Configure the histogram scale to sit at the bottom 30%
+        chart.priceScale('histogram-scale').applyOptions({
+            scaleMargins: {
+                top: 0.75, // Push to bottom
+                bottom: 0,
+            },
         });
 
-        const histData = pulseData.data.map(item => {
+        const histogramData = pulseData.data.map(item => {
             const direction = item.dominant_direction;
-            const intensity = direction > 0 ? (item.positive_intensity || 0) : (item.negative_intensity || 0);
-            const value = direction > 0 ? intensity * 20 : (direction < 0 ? -intensity * 20 : 0);
+            const intensity = direction > 0 ? (item.positive_intensity || 0.5) : (item.negative_intensity || 0.5);
 
             let color;
             if (direction > 0) {
                 const g = Math.round(90 + 165 * intensity);
                 const b = Math.round(102 * intensity);
-                color = `rgba(0, ${g}, ${b}, 0.9)`;
+                color = `rgba(0, ${g}, ${b}, 0.8)`;
             } else if (direction < 0) {
                 const r = Math.round(122 + 133 * intensity);
-                color = `rgba(${r}, ${Math.round(26 * intensity)}, ${Math.round(26 * intensity)}, 0.9)`;
+                const g = Math.round(26 * intensity);
+                color = `rgba(${r}, ${g}, ${g}, 0.8)`;
             } else {
                 color = 'rgba(107, 114, 128, 0.5)';
             }
 
-            return { time: item.date, value: value, color: color };
+            const value = direction > 0 ? intensity * 20 : (direction < 0 ? -intensity * 20 : 0);
+
+            return {
+                time: item.date,
+                value: value,
+                color: color
+            };
         });
 
-        histSeries.setData(histData);
+        histogramSeries.setData(histogramData);
 
-        // Subscribe to crosshair move for date tooltip on histogram
-        histogramChart.subscribeCrosshairMove((param) => {
+        // Crosshair handler for date
+        chart.subscribeCrosshairMove(param => {
             if (param.time) {
+                // Format date from timestamp (YYYY-MM-DD)
                 const dateStr = typeof param.time === 'string' ? param.time :
                     new Date(param.time * 1000).toISOString().split('T')[0];
                 setHoveredDate(dateStr);
@@ -4723,44 +4662,24 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
             }
         });
 
-        priceChart.timeScale().fitContent();
-        histogramChart.timeScale().fitContent();
+        // Fit content
+        chart.timeScale().fitContent();
 
-        priceChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-            if (range && histogramChartRef.current) {
-                histogramChartRef.current.timeScale().setVisibleRange(range);
-            }
-        });
-
+        // Handle Resize
         const handleResize = () => {
-            if (priceChartContainerRef.current && priceChartRef.current) {
-                priceChartRef.current.applyOptions({ width: priceChartContainerRef.current.clientWidth });
-            }
-            if (histogramContainerRef.current && histogramChartRef.current) {
-                histogramChartRef.current.applyOptions({ width: histogramContainerRef.current.clientWidth });
+            if (chartContainerRef.current) {
+                chart.applyOptions({ width: chartContainerRef.current.clientWidth });
             }
         };
 
         const resizeObserver = new ResizeObserver(entries => {
-            window.requestAnimationFrame(() => {
-                handleResize();
-            });
+            window.requestAnimationFrame(() => handleResize());
         });
-
-        if (priceChartContainerRef.current) {
-            resizeObserver.observe(priceChartContainerRef.current);
-        }
+        resizeObserver.observe(chartContainerRef.current);
 
         return () => {
             resizeObserver.disconnect();
-            if (priceChartRef.current) {
-                priceChartRef.current.remove();
-                priceChartRef.current = null;
-            }
-            if (histogramChartRef.current) {
-                histogramChartRef.current.remove();
-                histogramChartRef.current = null;
-            }
+            chart.remove();
         };
     }, [pulseData]);
 
@@ -4822,30 +4741,20 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
 
                 return (
                     <>
-                        <div
-                            ref={priceChartContainerRef}
-                            style={{
-                                width: '100%',
-                                height: '300px',
-                                borderRadius: '8px 8px 0 0',
-                                overflow: 'hidden'
-                            }}
-                        />
                         <div style={{ position: 'relative' }}>
                             <div
-                                ref={histogramContainerRef}
+                                ref={chartContainerRef}
                                 style={{
                                     width: '100%',
-                                    height: '100px',
-                                    borderRadius: '0 0 8px 8px',
-                                    overflow: 'hidden',
-                                    borderTop: '1px solid rgba(255,255,255,0.05)'
+                                    height: '400px',
+                                    borderRadius: '8px',
+                                    overflow: 'hidden'
                                 }}
                             />
                             {hoveredDate && (
                                 <div style={{
                                     position: 'absolute',
-                                    bottom: '4px',
+                                    bottom: '120px', // Adjusted to be above histogram
                                     left: '50%',
                                     transform: 'translateX(-50%)',
                                     background: 'rgba(0, 0, 0, 0.75)',
@@ -4914,6 +4823,7 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
         </Card>
     );
 }
+
 
 function StockDetailsPage({ watchlist, analyzedStocks, onAddStock, onRemoveStock, onWatchlistChange, onClearAnalysis }) {
     const [searchQuery, setSearchQuery] = useState('');
