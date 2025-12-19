@@ -1306,6 +1306,49 @@ async def get_history(ticker: str, period: str = "3y", include_bb: bool = True, 
         print(f"History error for {ticker}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+class BatchHistoryRequest(BaseModel):
+    tickers: List[str]
+    period: str = "3y"
+    include_bb: bool = False
+
+@app.post("/api/history-batch")
+async def get_history_batch(request: BatchHistoryRequest):
+    """
+    Get price history for multiple tickers efficiently.
+    Uses concurrency to fetch from cache/source.
+    """
+    if not request.tickers:
+        return {}
+    
+    # helper for single fetch (wrapper around get_history logic)
+    # we can call the function directly if we extract logic, or call via loop
+    # calling internal logic is better to avoid HTTP overhead
+    
+    async def fetch_single(ticker):
+        try:
+            # Reusing get_history logic by calling it directly? 
+            # Ideally get_history should be refactored, but calling it as a function is fine if it wasn't async def (it is async def)
+            # Since it's async def, we can await it directly.
+            result = await get_history(ticker, request.period, request.include_bb)
+            return ticker, result
+        except Exception as e:
+            return ticker, None
+
+    results = {}
+    
+    # Process in chunks to avoid overwhelming if list is huge
+    chunk_size = 20
+    for i in range(0, len(request.tickers), chunk_size):
+        chunk = request.tickers[i:i + chunk_size]
+        tasks = [fetch_single(t) for t in chunk]
+        batch_results = await asyncio.gather(*tasks)
+        
+        for ticker, data in batch_results:
+            if data:
+                results[ticker] = data["history"]
+    
+    return results
+
 @app.get("/api/volatility/{ticker}")
 async def get_volatility(ticker: str, refresh: bool = False):
     """Get volatility metrics for CSP strategy including IV Rank, HV, and recommendation.

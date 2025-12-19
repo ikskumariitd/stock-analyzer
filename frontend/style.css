@@ -254,7 +254,7 @@ body {
 /* Multi-Stock Grid */
 .stock-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+    grid-template-columns: 1fr;
     gap: 2.5rem;
     width: 100%;
     animation: fadeInUp 0.8s ease-out 0.4s backwards;

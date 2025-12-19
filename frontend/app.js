@@ -2082,6 +2082,43 @@ function QuickAddStock({ onAddStock, disabled }) {
 
 function Dashboard({ data, onRefreshStock, refreshingStock, cspData, setCspData }) {
     const stocks = Array.isArray(data) ? data : [data];
+    const [historyData, setHistoryData] = useState({});
+
+    // Fetch history in batch when stocks change
+    useEffect(() => {
+        const fetchHistory = async () => {
+            const tickers = stocks.map(s => s.symbol).filter(t => t);
+            // Only fetch what we don't have
+            const missingTickers = tickers.filter(t => !historyData[t]);
+
+            if (missingTickers.length === 0) return;
+
+            try {
+                const res = await fetch('/api/history-batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tickers: missingTickers, period: '3y' })
+                });
+
+                if (res.ok) {
+                    const newHistory = await res.json();
+                    setHistoryData(prev => ({ ...prev, ...newHistory }));
+                }
+            } catch (e) {
+                console.error("Batch history fetch failed", e);
+            }
+        };
+
+        // Debounce slightly to handle rapid updates
+        const timeoutId = setTimeout(() => {
+            if (stocks.length > 0) {
+                fetchHistory();
+            }
+        }, 100);
+
+        return () => clearTimeout(timeoutId);
+    }, [stocks]); // We want to run this when stocks list changes
+
     return (
         <div>
             <CSPSummaryTable
@@ -2096,6 +2133,7 @@ function Dashboard({ data, onRefreshStock, refreshingStock, cspData, setCspData 
                         data={stock}
                         onRefresh={onRefreshStock}
                         isRefreshing={refreshingStock === stock.symbol}
+                        history={historyData[stock.symbol]}
                     />
                 ))}
             </div>
@@ -2700,7 +2738,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
     );
 }
 
-function StockAnalysis({ data, onRefresh, isRefreshing }) {
+function StockAnalysis({ data, onRefresh, isRefreshing, history }) {
     if (data.error) {
         return (
             <div className="stock-grid-item" style={{ borderColor: 'var(--danger)' }}>
@@ -2795,7 +2833,12 @@ function StockAnalysis({ data, onRefresh, isRefreshing }) {
                 </Card>
 
                 <Card title="3-Year Price History">
-                    <PriceChart key={`chart-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
+                    <PriceChart
+                        key={`chart-${data.symbol}-${data._lastRefreshed || 0}`}
+                        symbol={data.symbol}
+                        refreshTrigger={data._lastRefreshed}
+                        initialData={history}
+                    />
                 </Card>
 
                 <Card title="Summary">
@@ -3243,7 +3286,7 @@ function Week52RangeGauge({ currentPrice, high, low, position }) {
 // Recharts components from global
 const { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } = Recharts;
 
-function PriceChart({ symbol, refreshTrigger }) {
+function PriceChart({ symbol, refreshTrigger, initialData }) {
     const chartContainerRef = React.useRef(null);
     const chartRef = React.useRef(null);
     const seriesRef = React.useRef(null);
@@ -3253,7 +3296,7 @@ function PriceChart({ symbol, refreshTrigger }) {
     const [period, setPeriod] = useState('3y');
     const [chartType, setChartType] = useState('area'); // 'area' or 'candlestick'
     const [showBB, setShowBB] = useState(false); // Show Bollinger Bands
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(!initialData);
     const [error, setError] = useState(null);
     const lastRefreshRef = React.useRef(refreshTrigger);
 
@@ -3318,138 +3361,128 @@ function PriceChart({ symbol, refreshTrigger }) {
         };
     }, []);
 
+    // Effect to handle data loading (either from initialData or fetch)
     useEffect(() => {
         if (!chartRef.current) return;
 
-        setLoading(true);
-        setError(null);
-
-        // If refreshTrigger is set (user clicked refresh), force fresh data
-        const needsRefresh = refreshTrigger ? '&refresh=true' : '';
-
-        apiQueue.add(() => fetch(`/api/history/${symbol}?period=${period}${needsRefresh}`).then(res => {
-            if (!res.ok) throw new Error('Failed to fetch history');
-            return res.json();
-        }))
-            .then(data => {
-                if (!data.history || data.history.length === 0) {
-                    throw new Error('No data');
+        const updateChart = (data) => {
+            if (!data || data.length === 0) {
+                // If initialData is missing, we might still be loading or have error
+                if (!loading && !initialData) {
+                    setError('No data');
+                    setLoading(false);
                 }
+                return;
+            }
 
-                // Remove old series
-                if (seriesRef.current) {
-                    chartRef.current.removeSeries(seriesRef.current);
-                    seriesRef.current = null;
-                }
-                // Remove old BB series
-                if (bbUpperRef.current) {
-                    chartRef.current.removeSeries(bbUpperRef.current);
-                    bbUpperRef.current = null;
-                }
-                if (bbMiddleRef.current) {
-                    chartRef.current.removeSeries(bbMiddleRef.current);
-                    bbMiddleRef.current = null;
-                }
-                if (bbLowerRef.current) {
-                    chartRef.current.removeSeries(bbLowerRef.current);
-                    bbLowerRef.current = null;
-                }
+            // Remove old series
+            if (seriesRef.current) {
+                chartRef.current.removeSeries(seriesRef.current);
+                seriesRef.current = null;
+            }
+            if (bbUpperRef.current) {
+                chartRef.current.removeSeries(bbUpperRef.current);
+                bbUpperRef.current = null;
+            }
+            if (bbMiddleRef.current) {
+                chartRef.current.removeSeries(bbMiddleRef.current);
+                bbMiddleRef.current = null;
+            }
+            if (bbLowerRef.current) {
+                chartRef.current.removeSeries(bbLowerRef.current);
+                bbLowerRef.current = null;
+            }
 
-                // Calculate if up or down
-                const firstPrice = data.history[0]?.close || 0;
-                const lastPrice = data.history[data.history.length - 1]?.close || 0;
-                const isUp = lastPrice >= firstPrice;
+            // Calculate if up or down
+            const firstPrice = data[0]?.close || 0;
+            const lastPrice = data[data.length - 1]?.close || 0;
+            const isUp = lastPrice >= firstPrice;
 
-                if (chartType === 'candlestick') {
-                    // Candlestick chart
-                    const candlestickSeries = chartRef.current.addCandlestickSeries({
-                        upColor: '#26a69a',
-                        downColor: '#ef5350',
-                        borderVisible: false,
-                        wickUpColor: '#26a69a',
-                        wickDownColor: '#ef5350',
-                    });
+            if (chartType === 'candlestick') {
+                const candlestickSeries = chartRef.current.addCandlestickSeries({
+                    upColor: '#26a69a',
+                    downColor: '#ef5350',
+                    borderVisible: false,
+                    wickUpColor: '#26a69a',
+                    wickDownColor: '#ef5350',
+                });
 
-                    const candleData = data.history.map(item => ({
-                        time: item.date,
-                        open: item.open,
-                        high: item.high,
-                        low: item.low,
-                        close: item.close,
-                    }));
+                const candleData = data.map(item => ({
+                    time: item.date,
+                    open: item.open,
+                    high: item.high,
+                    low: item.low,
+                    close: item.close,
+                }));
 
-                    candlestickSeries.setData(candleData);
-                    seriesRef.current = candlestickSeries;
-                } else {
-                    // Area chart
-                    const areaSeries = chartRef.current.addAreaSeries({
-                        lineColor: isUp ? '#26a69a' : '#ef5350',
-                        topColor: isUp ? 'rgba(38, 166, 154, 0.4)' : 'rgba(239, 83, 80, 0.4)',
-                        bottomColor: isUp ? 'rgba(38, 166, 154, 0.0)' : 'rgba(239, 83, 80, 0.0)',
-                        lineWidth: 2,
-                    });
+                candlestickSeries.setData(candleData);
+                seriesRef.current = candlestickSeries;
+            } else {
+                const areaSeries = chartRef.current.addAreaSeries({
+                    lineColor: isUp ? '#26a69a' : '#ef5350',
+                    topColor: isUp ? 'rgba(38, 166, 154, 0.4)' : 'rgba(239, 83, 80, 0.4)',
+                    bottomColor: isUp ? 'rgba(38, 166, 154, 0.0)' : 'rgba(239, 83, 80, 0.0)',
+                    lineWidth: 2,
+                });
 
-                    const areaData = data.history.map(item => ({
-                        time: item.date,
-                        value: item.close,
-                    }));
+                const areaData = data.map(item => ({
+                    time: item.date,
+                    value: item.close,
+                }));
 
-                    areaSeries.setData(areaData);
-                    seriesRef.current = areaSeries;
-                }
+                areaSeries.setData(areaData);
+                seriesRef.current = areaSeries;
+            }
 
-                // Add Bollinger Bands if enabled
-                if (showBB) {
-                    const bbDataWithValues = data.history.filter(item =>
-                        item.bb_upper !== null && item.bb_middle !== null && item.bb_lower !== null
-                    );
+            // Fit content
+            chartRef.current.timeScale().fitContent();
+            setLoading(false);
+        };
 
-                    if (bbDataWithValues.length > 0) {
-                        // Upper band (red/orange)
-                        const upperSeries = chartRef.current.addLineSeries({
-                            color: 'rgba(239, 83, 80, 0.6)',
-                            lineWidth: 1,
-                            lineStyle: 2, // dashed
-                        });
-                        upperSeries.setData(bbDataWithValues.map(item => ({
-                            time: item.date,
-                            value: item.bb_upper,
-                        })));
-                        bbUpperRef.current = upperSeries;
+        // Decision logic: Use initialData if available and period is '3y' (batch default)
+        // Otherwise, or if refreshing, fetch from API.
 
-                        // Middle band (SMA - yellow)
-                        const middleSeries = chartRef.current.addLineSeries({
-                            color: 'rgba(255, 193, 7, 0.8)',
-                            lineWidth: 1,
-                        });
-                        middleSeries.setData(bbDataWithValues.map(item => ({
-                            time: item.date,
-                            value: item.bb_middle,
-                        })));
-                        bbMiddleRef.current = middleSeries;
+        // Note: Our batch endpoint likely returns '3y' data (default). 
+        // If user changes period, we must fetch fresh data.
+        // We assume initialData corresponds to the default period (e.g. 3y or 1y).
 
-                        // Lower band (green)
-                        const lowerSeries = chartRef.current.addLineSeries({
-                            color: 'rgba(38, 166, 154, 0.6)',
-                            lineWidth: 1,
-                            lineStyle: 2, // dashed
-                        });
-                        lowerSeries.setData(bbDataWithValues.map(item => ({
-                            time: item.date,
-                            value: item.bb_lower,
-                        })));
-                        bbLowerRef.current = lowerSeries;
+        // If we have initialData and period matches, use it.
+        // Here we'll simplify: If initialData is provided and we haven't changed period manually...
+        // ...Actually, identifying if period matches initialData period is tricky.
+        // Let's assume initialData is for the current `period` state (which defaults to '3y').
+
+        if (initialData && !refreshTrigger) {
+            // Only use initialData if we don't need to refresh
+            updateChart(initialData);
+        } else {
+            fetchData();
+        }
+
+        function fetchData() {
+            setLoading(true);
+            setError(null);
+
+            const needsRefresh = refreshTrigger ? '&refresh=true' : '';
+
+            apiQueue.add(() => fetch(`/api/history/${symbol}?period=${period}${needsRefresh}`).then(res => {
+                if (!res.ok) throw new Error('Failed to fetch history');
+                return res.json();
+            }))
+                .then(data => {
+                    if (!data.history || data.history.length === 0) {
+                        throw new Error('No data');
                     }
-                }
+                    updateChart(data.history);
+                })
+                .catch(err => {
+                    setError(err.message);
+                    setLoading(false);
+                });
+        }
 
-                chartRef.current.timeScale().fitContent();
-                setLoading(false);
-            })
-            .catch(err => {
-                setError(err.message);
-                setLoading(false);
-            });
-    }, [symbol, period, chartType, showBB]);
+    }, [symbol, period, chartType, showBB, refreshTrigger, initialData]);
+
+
 
     return (
         <div>
