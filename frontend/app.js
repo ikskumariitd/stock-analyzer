@@ -3559,14 +3559,15 @@ function PriceChart({ symbol, refreshTrigger, initialData }) {
                 const hasBBData = data.some(item => item.bb_upper != null && item.bb_lower != null);
 
                 if (hasBBData) {
-                    // BB Upper line
+                    // BB Upper line (Red - resistance)
                     const bbUpperSeries = chartRef.current.addLineSeries({
-                        color: 'rgba(255, 193, 7, 0.6)',
+                        color: '#ef5350',
                         lineWidth: 1,
                         lineStyle: 2, // Dashed
-                        crosshairMarkerVisible: false,
-                        priceLineVisible: false,
-                        lastValueVisible: false,
+                        crosshairMarkerVisible: true,
+                        priceLineVisible: true,
+                        lastValueVisible: true,
+                        title: 'BB Upper',
                     });
                     bbUpperSeries.setData(
                         data
@@ -3575,13 +3576,14 @@ function PriceChart({ symbol, refreshTrigger, initialData }) {
                     );
                     bbUpperRef.current = bbUpperSeries;
 
-                    // BB Middle line (SMA 20)
+                    // BB Middle line (Orange - SMA 20)
                     const bbMiddleSeries = chartRef.current.addLineSeries({
-                        color: 'rgba(255, 193, 7, 0.9)',
+                        color: '#ff9800',
                         lineWidth: 1,
-                        crosshairMarkerVisible: false,
-                        priceLineVisible: false,
-                        lastValueVisible: false,
+                        crosshairMarkerVisible: true,
+                        priceLineVisible: true,
+                        lastValueVisible: true,
+                        title: 'BB Mid',
                     });
                     bbMiddleSeries.setData(
                         data
@@ -3590,14 +3592,15 @@ function PriceChart({ symbol, refreshTrigger, initialData }) {
                     );
                     bbMiddleRef.current = bbMiddleSeries;
 
-                    // BB Lower line
+                    // BB Lower line (Green - support)
                     const bbLowerSeries = chartRef.current.addLineSeries({
-                        color: 'rgba(255, 193, 7, 0.6)',
+                        color: '#26a69a',
                         lineWidth: 1,
                         lineStyle: 2, // Dashed
-                        crosshairMarkerVisible: false,
-                        priceLineVisible: false,
-                        lastValueVisible: false,
+                        crosshairMarkerVisible: true,
+                        priceLineVisible: true,
+                        lastValueVisible: true,
+                        title: 'BB Lower',
                     });
                     bbLowerSeries.setData(
                         data
