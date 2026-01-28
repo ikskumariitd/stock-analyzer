@@ -2871,8 +2871,21 @@ function StockAnalysis({ data, onRefresh, isRefreshing, history }) {
                     </div>
                     <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Real-time Analysis</div>
                 </div>
-                <div className="price-display" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div className="price-display" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     <span>${data.price.toFixed(2)}</span>
+                    {data.change_1d_pct !== null && data.change_1d_pct !== undefined && (
+                        <span style={{
+                            fontSize: '1.2rem',
+                            fontWeight: 600,
+                            color: data.change_1d_pct >= 0 ? '#16a34a' : '#dc2626',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem'
+                        }}>
+                            {data.change_1d_pct >= 0 ? '▲' : '▼'}
+                            {data.change_1d_pct >= 0 ? '+' : ''}{data.change_1d_pct.toFixed(2)}%
+                        </span>
+                    )}
                     {onRefresh && (
                         <button
                             onClick={() => onRefresh(data.symbol)}
