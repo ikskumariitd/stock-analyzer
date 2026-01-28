@@ -351,6 +351,7 @@ function App() {
     const [error, setError] = useState(null);
     const [addingStock, setAddingStock] = useState(false);
     const [loadingStock, setLoadingStock] = useState(null);
+    const [refreshingAll, setRefreshingAll] = useState(false);
     const [watchlistVersion, setWatchlistVersion] = useState(0);
     const [watchlist, setWatchlist] = useState([]);
 
@@ -555,6 +556,57 @@ function App() {
         }
     };
 
+    // Refresh all displayed stocks (force fresh fetch for all)
+    const handleRefreshAll = async () => {
+        if (!data || !Array.isArray(data) || data.length === 0) return;
+
+        const validStocks = data.filter(s => !s.error && s.symbol);
+        if (validStocks.length === 0) return;
+
+        const tickers = validStocks.map(s => s.symbol);
+        setRefreshingAll(true);
+
+        try {
+            const response = await fetch('/api/analyze-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tickers: tickers, refresh: true })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to refresh all stocks');
+            }
+
+            const newStockData = await response.json();
+            const refreshTime = Date.now();
+
+            // Update all stocks with fresh data
+            setData(prevData => {
+                if (!prevData || !Array.isArray(prevData)) return newStockData;
+
+                // Create a map of new data for quick lookup
+                const newDataMap = {};
+                newStockData.forEach(s => {
+                    if (s && s.symbol) {
+                        newDataMap[s.symbol] = { ...s, _lastRefreshed: refreshTime };
+                    }
+                });
+
+                // Replace each stock with new data if available
+                return prevData.map(s =>
+                    newDataMap[s.symbol] ? newDataMap[s.symbol] : s
+                );
+            });
+
+            // Clear CSP cache to force refetch
+            setCspData({});
+        } catch (err) {
+            console.error('Error refreshing all stocks:', err);
+        } finally {
+            setRefreshingAll(false);
+        }
+    };
+
     // Get list of analyzed stock symbols for display
     const analyzedStocks = data && Array.isArray(data)
         ? data.filter(s => !s.error).map(s => s.symbol)
@@ -644,6 +696,8 @@ function App() {
                             data={data}
                             onRefreshStock={handleRefreshStock}
                             refreshingStock={loadingStock}
+                            onRefreshAll={handleRefreshAll}
+                            refreshingAll={refreshingAll}
                             cspData={cspData}
                             setCspData={setCspData}
                         />
@@ -2080,7 +2134,7 @@ function QuickAddStock({ onAddStock, disabled }) {
 }
 
 
-function Dashboard({ data, onRefreshStock, refreshingStock, cspData, setCspData }) {
+function Dashboard({ data, onRefreshStock, refreshingStock, onRefreshAll, refreshingAll, cspData, setCspData }) {
     const stocks = Array.isArray(data) ? data : [data];
     const [historyData, setHistoryData] = useState({});
 
@@ -2119,6 +2173,8 @@ function Dashboard({ data, onRefreshStock, refreshingStock, cspData, setCspData 
         return () => clearTimeout(timeoutId);
     }, [stocks]); // We want to run this when stocks list changes
 
+    const validStockCount = stocks.filter(s => !s.error && s.symbol).length;
+
     return (
         <div>
             <CSPSummaryTable
@@ -2126,6 +2182,56 @@ function Dashboard({ data, onRefreshStock, refreshingStock, cspData, setCspData 
                 cachedData={cspData}
                 setCachedData={setCspData}
             />
+
+            {/* Refresh All Button */}
+            {validStockCount > 0 && onRefreshAll && (
+                <div style={{
+                    display: 'flex',
+                    justifyContent: 'flex-end',
+                    alignItems: 'center',
+                    marginBottom: '1rem',
+                    gap: '1rem'
+                }}>
+                    <span style={{
+                        fontSize: '0.85rem',
+                        color: 'var(--text-secondary)'
+                    }}>
+                        {validStockCount} stock{validStockCount !== 1 ? 's' : ''} displayed
+                    </span>
+                    <button
+                        onClick={onRefreshAll}
+                        disabled={refreshingAll}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            padding: '0.6rem 1.2rem',
+                            background: refreshingAll
+                                ? 'rgba(102, 126, 234, 0.5)'
+                                : 'linear-gradient(135deg, #667eea, #764ba2)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: refreshingAll ? 'not-allowed' : 'pointer',
+                            fontSize: '0.9rem',
+                            fontWeight: 600,
+                            boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)',
+                            transition: 'all 0.2s ease'
+                        }}
+                    >
+                        <span style={{
+                            animation: refreshingAll ? 'spin 1s linear infinite' : 'none',
+                            display: 'inline-block',
+                            fontSize: '1.1rem',
+                            lineHeight: 1
+                        }}>
+                            ↻
+                        </span>
+                        {refreshingAll ? 'Refreshing All...' : 'Refresh All'}
+                    </button>
+                </div>
+            )}
+
             <div className="stock-grid">
                 {stocks.map((stock, idx) => (
                     <StockAnalysis
