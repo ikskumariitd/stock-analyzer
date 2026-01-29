@@ -2375,6 +2375,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
             case 'rsi': return stock.indicators?.RSI || 0;
             case 'low52': return volData?.week52_low || 0;
             case 'high52': return volData?.week52_high || 0;
+            case 'iv': return volData?.current_iv || 0;
             case 'rank': return rating.rank || 0;
             case 'rating': return rating.sortOrder || 0;
             default: return 0;
@@ -2658,6 +2659,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                     { key: 'rsi', label: 'RSI' },
                                     { key: 'low52', label: '52L' },
                                     { key: 'high52', label: '52H' },
+                                    { key: 'iv', label: 'IV' },
                                     { key: 'rank', label: 'Rank' },
                                     { key: 'rating', label: 'Rating' }
                                 ].map(({ key, label }) => (
@@ -2696,7 +2698,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                         <tbody>
                             {filteredAndSortedStocks.length === 0 ? (
                                 <tr>
-                                    <td colSpan="9" style={{
+                                    <td colSpan="10" style={{
                                         textAlign: 'center',
                                         padding: '2rem',
                                         color: 'var(--text-secondary)'
@@ -2801,6 +2803,14 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                             whiteSpace: 'nowrap'
                                         }}>
                                             {volData?.week52_high ? `$${volData.week52_high.toFixed(0)}` : 'N/A'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.5rem',
+                                            fontWeight: 600,
+                                            color: volData?.current_iv >= 40 ? '#9b59b6' : volData?.current_iv >= 25 ? '#27ae60' : '#666',
+                                            whiteSpace: 'nowrap'
+                                        }}>
+                                            {volData?.current_iv ? `${volData.current_iv.toFixed(1)}%` : 'N/A'}
                                         </td>
                                         <td style={{
                                             padding: '0.5rem',
