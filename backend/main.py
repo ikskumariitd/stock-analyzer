@@ -1393,6 +1393,195 @@ async def get_csp_metrics(ticker: str, refresh: bool = False):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class CSPBatchRequest(BaseModel):
+    tickers: List[str]
+    refresh: bool = False
+
+
+@app.post("/api/csp-batch")
+async def get_csp_batch(request: CSPBatchRequest):
+    """
+    Get CSP summary data for multiple tickers at once.
+    Returns lightweight data for the CSP Opportunity Summary table:
+    - Basic price info (price, change, RSI)
+    - Volatility metrics (IV, rank, HV)
+    - 52-week range
+    - Company name
+    
+    This is optimized for fast loading of the CSP table before full analysis.
+    """
+    import math
+    
+    def sanitize(val):
+        if val is None:
+            return None
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return None
+        return round(val, 2) if isinstance(val, float) else val
+    
+    tickers = list(set([t.upper().strip() for t in request.tickers if t.strip()]))
+    
+    if not tickers:
+        return {"stocks": [], "csp_data": {}}
+    
+    print(f"CSP batch request for {len(tickers)} tickers...")
+    start_time = time_module.time()
+    
+    results = []
+    csp_data = {}
+    
+    async def fetch_stock_csp_data(ticker: str):
+        """Fetch basic stock info + CSP metrics for one ticker."""
+        try:
+            stock = yf.Ticker(ticker)
+            
+            # Get recent history for price and RSI
+            hist = stock.history(period="3mo")
+            if hist.empty:
+                return None
+            
+            current_price = hist['Close'].iloc[-1]
+            
+            # Calculate 1-day change
+            if len(hist) >= 2:
+                prev_close = hist['Close'].iloc[-2]
+                change_1d = current_price - prev_close
+                change_1d_pct = (change_1d / prev_close) * 100
+            else:
+                change_1d = 0
+                change_1d_pct = 0
+            
+            # Calculate RSI
+            import pandas_ta as ta
+            hist['RSI'] = ta.rsi(hist['Close'], length=14)
+            rsi = hist['RSI'].iloc[-1] if not hist['RSI'].empty else None
+            
+            # Get company name
+            name = POPULAR_STOCKS.get(ticker, None)
+            if not name:
+                try:
+                    name = stock.info.get('shortName') or stock.info.get('longName') or ticker
+                except:
+                    name = ticker
+            
+            stock_info = {
+                "symbol": ticker,
+                "name": name,
+                "price": sanitize(current_price),
+                "change_1d": sanitize(change_1d),
+                "change_1d_pct": sanitize(change_1d_pct),
+                "indicators": {
+                    "RSI": sanitize(rsi)
+                }
+            }
+            
+            # Fetch CSP-specific data (volatility and metrics)
+            vol_data = calculate_volatility_metrics(ticker, use_cache=not request.refresh)
+            csp_metrics = calculate_csp_metrics(ticker, use_cache=not request.refresh)
+            
+            # Merge CSP data
+            csp_combined = {}
+            if vol_data and "error" not in vol_data:
+                csp_combined.update(vol_data)
+            if csp_metrics and "error" not in csp_metrics:
+                csp_combined.update(csp_metrics)
+            
+            return stock_info, csp_combined
+            
+        except Exception as e:
+            print(f"CSP batch error for {ticker}: {e}")
+            return None
+    
+    # Fetch all in parallel
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=min(len(tickers), 20)) as executor:
+        tasks = [loop.run_in_executor(executor, lambda t=t: asyncio.run(
+            # We need to call the async-friendly version
+            asyncio.get_event_loop().run_in_executor(None, lambda: None)
+        ) or fetch_stock_csp_data_sync(t)) for t in tickers]
+        
+    # Simpler sync approach - works better for yfinance
+    def fetch_stock_csp_data_sync(ticker: str):
+        """Sync version for thread pool."""
+        try:
+            stock = yf.Ticker(ticker)
+            
+            # Get recent history for price and RSI
+            hist = stock.history(period="3mo")
+            if hist.empty:
+                return None
+            
+            current_price = hist['Close'].iloc[-1]
+            
+            # Calculate 1-day change
+            if len(hist) >= 2:
+                prev_close = hist['Close'].iloc[-2]
+                change_1d = current_price - prev_close
+                change_1d_pct = (change_1d / prev_close) * 100
+            else:
+                change_1d = 0
+                change_1d_pct = 0
+            
+            # Calculate RSI
+            import pandas_ta as ta
+            hist['RSI'] = ta.rsi(hist['Close'], length=14)
+            rsi = hist['RSI'].iloc[-1] if not hist['RSI'].empty else None
+            
+            # Get company name
+            name = POPULAR_STOCKS.get(ticker, None)
+            if not name:
+                try:
+                    name = stock.info.get('shortName') or stock.info.get('longName') or ticker
+                except:
+                    name = ticker
+            
+            stock_info = {
+                "symbol": ticker,
+                "name": name,
+                "price": sanitize(current_price),
+                "change_1d": sanitize(change_1d),
+                "change_1d_pct": sanitize(change_1d_pct),
+                "indicators": {
+                    "RSI": sanitize(rsi)
+                }
+            }
+            
+            # Fetch CSP-specific data (volatility and metrics)
+            vol_data = calculate_volatility_metrics(ticker, use_cache=not request.refresh)
+            csp_metrics = calculate_csp_metrics(ticker, use_cache=not request.refresh)
+            
+            # Merge CSP data
+            csp_combined = {}
+            if vol_data and "error" not in vol_data:
+                csp_combined.update(vol_data)
+            if csp_metrics and "error" not in csp_metrics:
+                csp_combined.update(csp_metrics)
+            
+            return ticker, stock_info, csp_combined
+            
+        except Exception as e:
+            print(f"CSP batch error for {ticker}: {e}")
+            return ticker, None, {}
+    
+    # Use thread pool for parallel fetching
+    with ThreadPoolExecutor(max_workers=min(len(tickers), 20)) as executor:
+        fetch_results = list(executor.map(fetch_stock_csp_data_sync, tickers))
+    
+    for result in fetch_results:
+        if result:
+            ticker, stock_info, csp_combined = result
+            if stock_info:
+                results.append(stock_info)
+                csp_data[ticker] = csp_combined
+    
+    print(f"CSP batch completed in {time_module.time() - start_time:.2f}s for {len(results)} stocks")
+    
+    return {
+        "stocks": results,
+        "csp_data": csp_data
+    }
+
+
 @app.get("/api/search-stocks/{query}")
 async def search_stocks(query: str):
     """

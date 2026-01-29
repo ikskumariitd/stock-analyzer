@@ -348,6 +348,7 @@ function App() {
     const [currentView, setCurrentView] = useState('home');
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [loadingFullAnalysis, setLoadingFullAnalysis] = useState(false); // For background full analysis
     const [error, setError] = useState(null);
     const [addingStock, setAddingStock] = useState(false);
     const [loadingStock, setLoadingStock] = useState(null);
@@ -483,6 +484,7 @@ function App() {
     };
 
     // Analyze all stocks from a list (for "Analyze All" button)
+    // CSP-First Loading: Fetch CSP data first (fast), then full analysis in background
     const handleAnalyzeAll = async (tickers) => {
         if (!tickers || tickers.length === 0) return;
 
@@ -494,7 +496,48 @@ function App() {
 
         setLoading(true);
         setError(null);
+
         try {
+            // STEP 1: Fetch CSP data first (lightweight, fast)
+            const cspResponse = await fetch('/api/csp-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tickers: newTickers })
+            });
+
+            if (cspResponse.ok) {
+                const cspResult = await cspResponse.json();
+
+                // Set minimal stock data from CSP response to show table immediately
+                if (cspResult.stocks && cspResult.stocks.length > 0) {
+                    // Mark as lightweight data (not full analysis)
+                    const lightweightStocks = cspResult.stocks.map(s => ({
+                        ...s,
+                        _lightweight: true, // Flag for incomplete data
+                        sentiment: { mood: 'Loading...', description: 'Full analysis in progress...' },
+                        summary: 'Loading detailed analysis...'
+                    }));
+
+                    setData(prevData => {
+                        if (prevData && Array.isArray(prevData)) {
+                            return [...lightweightStocks, ...prevData];
+                        }
+                        return lightweightStocks;
+                    });
+
+                    // Set CSP data cache
+                    if (cspResult.csp_data) {
+                        setCspData(prevCsp => ({ ...prevCsp, ...cspResult.csp_data }));
+                    }
+                }
+            }
+
+            // CSP table is now visible - stop showing main loading indicator
+            setLoading(false);
+
+            // STEP 2: Fetch full analysis in background
+            setLoadingFullAnalysis(true);
+
             const response = await fetch('/api/analyze-batch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -502,23 +545,42 @@ function App() {
             });
 
             if (!response.ok) {
-                throw new Error('Failed to fetch stock data');
+                throw new Error('Failed to fetch full stock data');
             }
 
             const newStockData = await response.json();
 
             if (newStockData && newStockData.length > 0) {
+                // Replace lightweight data with full data
                 setData(prevData => {
-                    if (prevData && Array.isArray(prevData)) {
-                        return [...newStockData, ...prevData];
-                    }
-                    return newStockData;
+                    if (!prevData || !Array.isArray(prevData)) return newStockData;
+
+                    // Create a map of new full data
+                    const fullDataMap = {};
+                    newStockData.forEach(s => {
+                        if (s && s.symbol) fullDataMap[s.symbol] = s;
+                    });
+
+                    // Replace lightweight entries with full data, keep others
+                    const updated = prevData.map(s => {
+                        if (fullDataMap[s.symbol]) {
+                            return { ...fullDataMap[s.symbol], _lightweight: false };
+                        }
+                        return s;
+                    });
+
+                    // Add any new stocks not in prevData
+                    const existingSymbols = updated.map(s => s.symbol);
+                    const addNew = newStockData.filter(s => !existingSymbols.includes(s.symbol));
+
+                    return [...addNew, ...updated];
                 });
             }
         } catch (err) {
             setError(err.message);
         } finally {
             setLoading(false);
+            setLoadingFullAnalysis(false);
         }
     };
 
@@ -700,6 +762,7 @@ function App() {
                             refreshingAll={refreshingAll}
                             cspData={cspData}
                             setCspData={setCspData}
+                            loadingFullAnalysis={loadingFullAnalysis}
                         />
                     )}
                 </>
@@ -2133,8 +2196,7 @@ function QuickAddStock({ onAddStock, disabled }) {
     );
 }
 
-
-function Dashboard({ data, onRefreshStock, refreshingStock, onRefreshAll, refreshingAll, cspData, setCspData }) {
+function Dashboard({ data, onRefreshStock, refreshingStock, onRefreshAll, refreshingAll, cspData, setCspData, loadingFullAnalysis }) {
     const stocks = Array.isArray(data) ? data : [data];
     const [historyData, setHistoryData] = useState({});
 
@@ -2174,9 +2236,38 @@ function Dashboard({ data, onRefreshStock, refreshingStock, onRefreshAll, refres
     }, [stocks]); // We want to run this when stocks list changes
 
     const validStockCount = stocks.filter(s => !s.error && s.symbol).length;
+    const lightweightCount = stocks.filter(s => s._lightweight).length;
 
     return (
         <div>
+            {/* Background Loading Indicator */}
+            {loadingFullAnalysis && (
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.75rem',
+                    padding: '0.75rem 1.5rem',
+                    marginBottom: '1rem',
+                    background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1))',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(102, 126, 234, 0.2)'
+                }}>
+                    <span style={{
+                        fontSize: '1.2rem',
+                        animation: 'spin 1s linear infinite',
+                        display: 'inline-block'
+                    }}>⏳</span>
+                    <span style={{
+                        color: '#667eea',
+                        fontSize: '0.95rem',
+                        fontWeight: 500
+                    }}>
+                        Loading detailed analysis for {lightweightCount} stock{lightweightCount !== 1 ? 's' : ''}...
+                    </span>
+                </div>
+            )}
+
             <CSPSummaryTable
                 stocks={stocks}
                 cachedData={cspData}
@@ -2867,6 +2958,8 @@ function StockAnalysis({ data, onRefresh, isRefreshing, history }) {
         );
     }
 
+    const isLightweight = data._lightweight;
+
     return (
         <div className="stock-grid-item" id={`stock-${data.symbol}`}>
             <div className="header-row">
@@ -2879,7 +2972,9 @@ function StockAnalysis({ data, onRefresh, isRefreshing, history }) {
                             </span>
                         )}
                     </div>
-                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Real-time Analysis</div>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                        {isLightweight ? 'Initializing Analysis...' : 'Real-time Analysis'}
+                    </div>
                 </div>
                 <div className="price-display" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     <span>${data.price.toFixed(2)}</span>
@@ -2899,7 +2994,7 @@ function StockAnalysis({ data, onRefresh, isRefreshing, history }) {
                     {onRefresh && (
                         <button
                             onClick={() => onRefresh(data.symbol)}
-                            disabled={isRefreshing}
+                            disabled={isRefreshing || isLightweight}
                             style={{
                                 background: 'rgba(102, 126, 234, 0.1)',
                                 border: 'none',
@@ -2910,13 +3005,13 @@ function StockAnalysis({ data, onRefresh, isRefreshing, history }) {
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                cursor: isRefreshing ? 'default' : 'pointer',
-                                opacity: isRefreshing ? 0.7 : 1,
+                                cursor: (isRefreshing || isLightweight) ? 'default' : 'pointer',
+                                opacity: (isRefreshing || isLightweight) ? 0.7 : 1,
                                 padding: 0,
                                 transition: 'all 0.2s ease'
                             }}
-                            onMouseEnter={(e) => !isRefreshing && (e.target.style.background = 'rgba(102, 126, 234, 0.2)')}
-                            onMouseLeave={(e) => !isRefreshing && (e.target.style.background = 'rgba(102, 126, 234, 0.1)')}
+                            onMouseEnter={(e) => !(isRefreshing || isLightweight) && (e.target.style.background = 'rgba(102, 126, 234, 0.2)')}
+                            onMouseLeave={(e) => !(isRefreshing || isLightweight) && (e.target.style.background = 'rgba(102, 126, 234, 0.1)')}
                             title="Refresh Data"
                         >
                             <span style={{
@@ -2935,31 +3030,43 @@ function StockAnalysis({ data, onRefresh, isRefreshing, history }) {
 
             <div className="dashboard" style={{ gridTemplateColumns: '1fr', gap: '1rem', animation: 'none' }}>
                 <Card title="Sentiment">
-                    <div className="indicator-row" style={{ border: 'none', padding: 0, marginBottom: 0 }}>
-                        <span style={{ fontSize: '1.1rem', fontWeight: 600 }}
-                            className={data.sentiment.mood === 'Bullish' ? 'text-bullish' : data.sentiment.mood === 'Bearish' ? 'text-bearish' : 'text-neutral'}>
-                            {data.sentiment.mood}
-                        </span>
-                    </div>
+                    {isLightweight ? (
+                        <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', padding: '0.5rem 0' }}>
+                            <span style={{ animation: 'pulse 1.5s infinite', display: 'inline-block' }}>🔍 Analyzing sentiment...</span>
+                        </div>
+                    ) : (
+                        <div className="indicator-row" style={{ border: 'none', padding: 0, marginBottom: 0 }}>
+                            <span style={{ fontSize: '1.1rem', fontWeight: 600 }}
+                                className={data.sentiment.mood === 'Bullish' ? 'text-bullish' : data.sentiment.mood === 'Bearish' ? 'text-bearish' : 'text-neutral'}>
+                                {data.sentiment.mood}
+                            </span>
+                        </div>
+                    )}
                 </Card>
 
                 <VolatilityCard key={`vol-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
                 <InteractiveMysticPulseChart key={`pulse-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
-
-
                 <CSPMetricsCard key={`csp-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
-
                 <Card title="Key Indicators">
-                    <RSIVisualizer value={data.indicators.RSI} />
-                    <BollingerVisualizer
-                        price={data.price}
-                        upper={data.indicators.BB_Upper}
-                        lower={data.indicators.BB_Lower}
-                    />
-                    <IndicatorRow label="SMA (200)" value={data.indicators.SMA_200} />
+                    {isLightweight ? (
+                        <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '0.5rem 0' }}>
+                            <div style={{ height: '40px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', animation: 'pulse 1.5s infinite' }}></div>
+                            <div style={{ height: '40px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', animation: 'pulse 1.5s infinite', animationDelay: '0.2s' }}></div>
+                        </div>
+                    ) : (
+                        <>
+                            <RSIVisualizer value={data.indicators.RSI} />
+                            <BollingerVisualizer
+                                price={data.price}
+                                upper={data.indicators.BB_Upper}
+                                lower={data.indicators.BB_Lower}
+                            />
+                            <IndicatorRow label="SMA (200)" value={data.indicators.SMA_200} />
+                        </>
+                    )}
                 </Card>
 
                 <Card title="3-Year Price History">
@@ -2972,7 +3079,15 @@ function StockAnalysis({ data, onRefresh, isRefreshing, history }) {
                 </Card>
 
                 <Card title="Summary">
-                    <p className="summary-text" style={{ fontSize: '0.9rem' }}>{data.summary}</p>
+                    {isLightweight ? (
+                        <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', minHeight: '60px' }}>
+                            <div style={{ height: '14px', width: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', marginBottom: '8px', animation: 'pulse 1.5s infinite' }}></div>
+                            <div style={{ height: '14px', width: '90%', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', marginBottom: '8px', animation: 'pulse 1.5s infinite', animationDelay: '0.1s' }}></div>
+                            <div style={{ height: '14px', width: '95%', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', animation: 'pulse 1.5s infinite', animationDelay: '0.2s' }}></div>
+                        </div>
+                    ) : (
+                        <p className="summary-text" style={{ fontSize: '0.9rem' }}>{data.summary}</p>
+                    )}
                 </Card>
             </div>
         </div>
