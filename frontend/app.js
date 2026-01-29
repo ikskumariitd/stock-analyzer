@@ -3477,7 +3477,7 @@ function PriceChart({ symbol, refreshTrigger, initialData }) {
 
         return () => {
             resizeObserver.disconnect();
-            chart.remove();
+            try { chart.remove(); } catch (e) { /* Chart may already be disposed */ }
         };
     }, []);
 
@@ -3953,7 +3953,7 @@ function MysticPulseCard({ symbol, refreshTrigger }) {
 
         // Clean up existing charts
         if (chartRef.current) {
-            chartRef.current.remove();
+            try { chartRef.current.remove(); } catch (e) { /* Chart may already be disposed */ }
             chartRef.current = null;
         }
 
@@ -3998,43 +3998,45 @@ function MysticPulseCard({ symbol, refreshTrigger }) {
         });
 
         // Prepare candlestick data with colors based on Mystic Pulse direction
-        const candleData = pulseData.data.map(item => {
-            const direction = item.dominant_direction;
-            const intensity = direction > 0 ? (item.positive_intensity || 0.5) : (item.negative_intensity || 0.5);
+        const candleData = pulseData.data
+            .filter(item => item.date && item.open != null && item.high != null && item.low != null && item.close != null)
+            .map(item => {
+                const direction = item.dominant_direction;
+                const intensity = direction > 0 ? (item.positive_intensity || 0.5) : (item.negative_intensity || 0.5);
 
-            let upColor, downColor, wickColor;
-            if (direction > 0) {
-                // Bullish - use green shades
-                const g = Math.round(90 + 165 * intensity);
-                const b = Math.round(102 * intensity);
-                upColor = `rgb(0, ${g}, ${b})`;
-                downColor = `rgb(0, ${Math.max(60, g - 50)}, ${Math.max(0, b - 30)})`;
-                wickColor = upColor;
-            } else if (direction < 0) {
-                // Bearish - use red shades
-                const r = Math.round(122 + 133 * intensity);
-                const g = Math.round(26 * intensity);
-                upColor = `rgb(${Math.max(100, r - 50)}, ${g}, ${g})`;
-                downColor = `rgb(${r}, ${g}, ${g})`;
-                wickColor = downColor;
-            } else {
-                // Neutral - gray
-                upColor = '#6B7280';
-                downColor = '#4B5563';
-                wickColor = '#6B7280';
-            }
+                let upColor, downColor, wickColor;
+                if (direction > 0) {
+                    // Bullish - use green shades
+                    const g = Math.round(90 + 165 * intensity);
+                    const b = Math.round(102 * intensity);
+                    upColor = `rgb(0, ${g}, ${b})`;
+                    downColor = `rgb(0, ${Math.max(60, g - 50)}, ${Math.max(0, b - 30)})`;
+                    wickColor = upColor;
+                } else if (direction < 0) {
+                    // Bearish - use red shades
+                    const r = Math.round(122 + 133 * intensity);
+                    const g = Math.round(26 * intensity);
+                    upColor = `rgb(${Math.max(100, r - 50)}, ${g}, ${g})`;
+                    downColor = `rgb(${r}, ${g}, ${g})`;
+                    wickColor = downColor;
+                } else {
+                    // Neutral - gray
+                    upColor = '#6B7280';
+                    downColor = '#4B5563';
+                    wickColor = '#6B7280';
+                }
 
-            return {
-                time: item.date,
-                open: item.open,
-                high: item.high,
-                low: item.low,
-                close: item.close,
-                color: item.close >= item.open ? upColor : downColor,
-                borderColor: item.close >= item.open ? upColor : downColor,
-                wickColor: wickColor,
-            };
-        });
+                return {
+                    time: item.date,
+                    open: item.open,
+                    high: item.high,
+                    low: item.low,
+                    close: item.close,
+                    color: item.close >= item.open ? upColor : downColor,
+                    borderColor: item.close >= item.open ? upColor : downColor,
+                    wickColor: wickColor,
+                };
+            });
 
         candleSeries.setData(candleData);
 
@@ -4054,7 +4056,7 @@ function MysticPulseCard({ symbol, refreshTrigger }) {
             },
         });
 
-        const histogramData = pulseData.data.map(item => {
+        const histogramData = pulseData.data.filter(item => item.date && (item.positive_intensity != null || item.negative_intensity != null)).map(item => {
             const direction = item.dominant_direction;
             const intensity = direction > 0 ? (item.positive_intensity || 0.5) : (item.negative_intensity || 0.5);
 
@@ -4111,7 +4113,7 @@ function MysticPulseCard({ symbol, refreshTrigger }) {
 
         return () => {
             resizeObserver.disconnect();
-            chart.remove();
+            try { chart.remove(); } catch (e) { /* Chart may already be disposed */ }
         };
     }, [pulseData]);
 
@@ -4331,7 +4333,7 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
 
         // Clean up existing charts
         if (chartRef.current) {
-            chartRef.current.remove();
+            try { chartRef.current.remove(); } catch (e) { /* Chart may already be disposed */ }
             chartRef.current = null;
         }
 
@@ -4376,40 +4378,42 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
             wickDownColor: '#ef5350',
         });
 
-        const candleData = pulseData.data.map(item => {
-            const direction = item.dominant_direction;
-            const intensity = direction > 0 ? (item.positive_intensity || 0.5) : (item.negative_intensity || 0.5);
+        const candleData = pulseData.data
+            .filter(item => item.date && item.open != null && item.high != null && item.low != null && item.close != null)
+            .map(item => {
+                const direction = item.dominant_direction;
+                const intensity = direction > 0 ? (item.positive_intensity || 0.5) : (item.negative_intensity || 0.5);
 
-            let upColor, downColor, wickColor;
-            if (direction > 0) {
-                const g = Math.round(90 + 165 * intensity);
-                const b = Math.round(102 * intensity);
-                upColor = `rgb(0, ${g}, ${b})`;
-                downColor = `rgb(0, ${Math.max(60, g - 50)}, ${Math.max(0, b - 30)})`;
-                wickColor = upColor;
-            } else if (direction < 0) {
-                const r = Math.round(122 + 133 * intensity);
-                const g = Math.round(26 * intensity);
-                upColor = `rgb(${Math.max(100, r - 50)}, ${g}, ${g})`;
-                downColor = `rgb(${r}, ${g}, ${g})`;
-                wickColor = downColor;
-            } else {
-                upColor = '#6B7280';
-                downColor = '#4B5563';
-                wickColor = '#6B7280';
-            }
+                let upColor, downColor, wickColor;
+                if (direction > 0) {
+                    const g = Math.round(90 + 165 * intensity);
+                    const b = Math.round(102 * intensity);
+                    upColor = `rgb(0, ${g}, ${b})`;
+                    downColor = `rgb(0, ${Math.max(60, g - 50)}, ${Math.max(0, b - 30)})`;
+                    wickColor = upColor;
+                } else if (direction < 0) {
+                    const r = Math.round(122 + 133 * intensity);
+                    const g = Math.round(26 * intensity);
+                    upColor = `rgb(${Math.max(100, r - 50)}, ${g}, ${g})`;
+                    downColor = `rgb(${r}, ${g}, ${g})`;
+                    wickColor = downColor;
+                } else {
+                    upColor = '#6B7280';
+                    downColor = '#4B5563';
+                    wickColor = '#6B7280';
+                }
 
-            return {
-                time: item.date,
-                open: item.open,
-                high: item.high,
-                low: item.low,
-                close: item.close,
-                color: item.close >= item.open ? upColor : downColor,
-                borderColor: item.close >= item.open ? upColor : downColor,
-                wickColor: wickColor,
-            };
-        });
+                return {
+                    time: item.date,
+                    open: item.open,
+                    high: item.high,
+                    low: item.low,
+                    close: item.close,
+                    color: item.close >= item.open ? upColor : downColor,
+                    borderColor: item.close >= item.open ? upColor : downColor,
+                    wickColor: wickColor,
+                };
+            });
 
         candleSeries.setData(candleData);
 
@@ -4429,7 +4433,7 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
             },
         });
 
-        const histogramData = pulseData.data.map(item => {
+        const histogramData = pulseData.data.filter(item => item.date && (item.positive_intensity != null || item.negative_intensity != null)).map(item => {
             const direction = item.dominant_direction;
             const intensity = direction > 0 ? (item.positive_intensity || 0.5) : (item.negative_intensity || 0.5);
 
@@ -4486,23 +4490,28 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
 
         return () => {
             resizeObserver.disconnect();
-            chart.remove();
+            try { chart.remove(); } catch (e) { /* Chart may already be disposed */ }
         };
     }, [pulseData]);
 
-    const periods = ['6mo', '1y', '3y', '5y'];
+    const periods = [
+        { label: '6M', value: '6mo' },
+        { label: '1Y', value: '1y' },
+        { label: '3Y', value: '3y' },
+        { label: '5Y', value: '5y' }
+    ];
 
     return (
-        <Card title={`🔮 Mystic Pulse - ${period.toUpperCase()}`}>
+        <Card title={`🔮 Mystic Pulse - ${periods.find(p => p.value === period)?.label || period.toUpperCase()}`}>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginBottom: '1rem' }}>
                 {periods.map(p => (
                     <button
-                        key={p}
-                        onClick={() => setPeriod(p)}
+                        key={p.value}
+                        onClick={() => setPeriod(p.value)}
                         style={{
                             padding: '4px 12px',
-                            background: period === p ? 'var(--accent-color)' : 'rgba(102, 126, 234, 0.1)',
-                            color: period === p ? 'white' : 'var(--text-primary)',
+                            background: period === p.value ? 'var(--accent-color)' : 'rgba(102, 126, 234, 0.1)',
+                            color: period === p.value ? 'white' : 'var(--text-primary)',
                             border: 'none',
                             borderRadius: '4px',
                             cursor: 'pointer',
@@ -4511,7 +4520,7 @@ function InteractiveMysticPulseChart({ symbol, refreshTrigger }) {
                             transition: 'all 0.2s'
                         }}
                     >
-                        {p.toUpperCase()}
+                        {p.label}
                     </button>
                 ))}
             </div>

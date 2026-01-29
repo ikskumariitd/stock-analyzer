@@ -1211,20 +1211,21 @@ async def get_history(ticker: str, period: str = "3y", include_bb: bool = True, 
     # Period to days mapping for filtering
     period_days = {
         "1d": 1,
-        "5d": 5,
-        "1mo": 30,
-        "3mo": 90,
-        "6mo": 180,
-        "1y": 365,
-        "2y": 730,
-        "3y": 1095,
-        "5y": 1825,
-        "10y": 3650,
-        "max": 99999  # Effectively no limit
+        "5d": 5, "5day": 5,
+        "1mo": 30, "1m": 30,
+        "3mo": 90, "3m": 90,
+        "6mo": 180, "6m": 180,
+        "1y": 365, "1year": 365,
+        "2y": 730, "2year": 730,
+        "3y": 1095, "3year": 1095,
+        "5y": 1825, "5year": 1825,
+        "10y": 3650, "10year": 3650,
+        "max": 99999
     }
     
     try:
         ticker = ticker.upper().strip()
+        period = period.lower().strip()
         # Cache key is just ticker - we cache full history
         cache_key = f"history:{ticker}"
         
@@ -1490,19 +1491,20 @@ async def get_mystic_pulse(ticker: str, period: str = "1y", adx_length: int = 9,
     
     # Period to days mapping for filtering
     period_days = {
-        "1mo": 30,
-        "3mo": 90,
-        "6mo": 180,
-        "1y": 365,
-        "2y": 730,
-        "3y": 1095,
-        "5y": 1825,
-        "10y": 3650,
+        "1mo": 30, "1m": 30,
+        "3mo": 90, "3m": 90,
+        "6mo": 180, "6m": 180,
+        "1y": 365, "1year": 365,
+        "2y": 730, "2year": 730,
+        "3y": 1095, "3year": 1095,
+        "5y": 1825, "5year": 1825,
+        "10y": 3650, "10year": 3650,
         "max": 99999
     }
     
     try:
         ticker = ticker.upper().strip()
+        period = period.lower().strip()
         # Cache key is ticker + indicator params only (not period)
         cache_key = f"mystic_pulse:{ticker}:{adx_length}:{smoothing_factor}"
         
