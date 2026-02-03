@@ -2469,6 +2469,12 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
             case 'iv': return volData?.current_iv || 0;
             case 'rank': return rating.rank || 0;
             case 'rating': return rating.sortOrder || 0;
+            case 'delta30_dte': return volData?.delta30_dte || 0;
+            case 'delta30_expiry': return volData?.delta30_expiry || '';
+            case 'delta30_strike': return volData?.delta30_strike || 0;
+            case 'delta30_bid': return volData?.delta30_bid || 0;
+            case 'delta30_roi': return volData?.delta30_roi || 0;
+            case 'delta30_roi_annual': return volData?.delta30_roi_annual || 0;
             default: return 0;
         }
     };
@@ -2752,7 +2758,13 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                     { key: 'high52', label: '52H' },
                                     { key: 'iv', label: 'IV' },
                                     { key: 'rank', label: 'Rank' },
-                                    { key: 'rating', label: 'Rating' }
+                                    { key: 'rating', label: 'Rating' },
+                                    { key: 'delta30_dte', label: 'DTE' },
+                                    { key: 'delta30_expiry', label: 'Expiry' },
+                                    { key: 'delta30_strike', label: '30Δ Strike' },
+                                    { key: 'delta30_bid', label: '30Δ Bid' },
+                                    { key: 'delta30_roi', label: 'ROI%' },
+                                    { key: 'delta30_roi_annual', label: 'Ann.ROI%' }
                                 ].map(({ key, label }) => (
                                     <th
                                         key={key}
@@ -2789,7 +2801,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                         <tbody>
                             {filteredAndSortedStocks.length === 0 ? (
                                 <tr>
-                                    <td colSpan="10" style={{
+                                    <td colSpan="16" style={{
                                         textAlign: 'center',
                                         padding: '2rem',
                                         color: 'var(--text-secondary)'
@@ -2932,6 +2944,56 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                             }}>
                                                 {rating.icon} {rating.text}
                                             </span>
+                                        </td>
+                                        {/* 30-Delta Put Data */}
+                                        <td style={{
+                                            padding: '0.5rem',
+                                            fontWeight: 600,
+                                            color: '#667eea',
+                                            whiteSpace: 'nowrap'
+                                        }}>
+                                            {volData?.delta30_dte ? `${volData.delta30_dte}d` : '-'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.5rem',
+                                            fontWeight: 500,
+                                            color: '#555',
+                                            whiteSpace: 'nowrap',
+                                            fontSize: '0.75rem'
+                                        }}>
+                                            {volData?.delta30_expiry || '-'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.5rem',
+                                            fontWeight: 500,
+                                            color: '#555',
+                                            whiteSpace: 'nowrap'
+                                        }}>
+                                            {volData?.delta30_strike ? `$${volData.delta30_strike.toFixed(0)}` : '-'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.5rem',
+                                            fontWeight: 600,
+                                            color: '#2e7d32',
+                                            whiteSpace: 'nowrap'
+                                        }}>
+                                            {volData?.delta30_bid ? `$${volData.delta30_bid.toFixed(2)}` : '-'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.5rem',
+                                            fontWeight: 700,
+                                            color: volData?.delta30_roi >= 5 ? '#27ae60' : volData?.delta30_roi >= 3 ? '#f39c12' : '#666',
+                                            whiteSpace: 'nowrap'
+                                        }}>
+                                            {volData?.delta30_roi ? `${volData.delta30_roi.toFixed(1)}%` : '-'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.5rem',
+                                            fontWeight: 600,
+                                            color: volData?.delta30_roi_annual >= 50 ? '#9b59b6' : volData?.delta30_roi_annual >= 30 ? '#27ae60' : '#666',
+                                            whiteSpace: 'nowrap'
+                                        }}>
+                                            {volData?.delta30_roi_annual ? `${volData.delta30_roi_annual.toFixed(0)}%` : '-'}
                                         </td>
                                     </tr>
                                 );

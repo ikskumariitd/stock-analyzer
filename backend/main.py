@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 import lxml # Ensure lxml is available for read_html
 from sp100_tickers import SP100_TICKERS
+from scipy.stats import norm  # For Black-Scholes delta calculation
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -372,6 +373,155 @@ from typing import List, Dict, Any, Optional
 import numpy as np
 from datetime import timedelta
 
+# ============================================
+# Options Delta Calculation (Black-Scholes)
+# ============================================
+
+def calculate_option_delta(S: float, K: float, T: float, r: float, sigma: float, option_type: str = 'put') -> float:
+    """
+    Calculate option delta using Black-Scholes model.
+    
+    Args:
+        S: Current stock price
+        K: Strike price
+        T: Time to expiration in years
+        r: Risk-free rate (e.g., 0.045 for 4.5%)
+        sigma: Implied volatility (decimal, e.g., 0.80 for 80%)
+        option_type: 'call' or 'put'
+    
+    Returns:
+        Delta value (-1 to 0 for puts, 0 to 1 for calls)
+    """
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return 0.0
+    
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    
+    if option_type == 'call':
+        return float(norm.cdf(d1))
+    else:  # put
+        return float(norm.cdf(d1) - 1)
+
+
+def get_30_delta_put(ticker_symbol: str, current_price: float, use_cache: bool = True) -> dict:
+    """
+    Find the put option closest to 30 delta (~30 DTE) and calculate seller's ROI.
+    
+    Returns dict with:
+        - delta30_strike: Strike price of the ~30 delta put
+        - delta30_bid: Bid price
+        - delta30_delta: Actual delta value
+        - delta30_roi: Seller's ROI % (bid/strike * 100)
+        - delta30_roi_annual: Annualized ROI %
+        - delta30_dte: Days to expiration
+        - delta30_expiry: Expiration date string
+    """
+    import math
+    ticker_symbol = ticker_symbol.upper().strip()
+    cache_key = f"delta30:{ticker_symbol}"
+    
+    # Check cache first
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            cached["_cached"] = True
+            created_ts = cache.get_created_timestamp(cache_key)
+            cached["_cache_age_minutes"] = round((time_module.time() - created_ts) / 60, 1) if created_ts else 0
+            return cached
+    
+    def sanitize(val):
+        if val is None:
+            return None
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return None
+        return round(val, 2) if isinstance(val, float) else val
+    
+    try:
+        stock = yf.Ticker(ticker_symbol)
+        options_dates = stock.options
+        
+        if not options_dates or len(options_dates) == 0:
+            return {"delta30_error": "No options available"}
+        
+        # Find expiry closest to 30 DTE
+        today = datetime.now()
+        target_date = today + timedelta(days=30)
+        
+        best_expiry = min(options_dates, 
+                          key=lambda x: abs((datetime.strptime(x, "%Y-%m-%d") - target_date).days))
+        
+        expiry_date = datetime.strptime(best_expiry, "%Y-%m-%d")
+        dte = (expiry_date - today).days
+        
+        if dte <= 0:
+            return {"delta30_error": "No valid expiration dates"}
+        
+        T = dte / 365.0
+        risk_free_rate = 0.045  # ~4.5%
+        
+        chain = stock.option_chain(best_expiry)
+        puts = chain.puts.copy()
+        
+        if puts.empty:
+            return {"delta30_error": "No put options available"}
+        
+        # Calculate delta for each put option
+        puts['calculated_delta'] = puts.apply(
+            lambda row: calculate_option_delta(
+                S=current_price,
+                K=row['strike'],
+                T=T,
+                r=risk_free_rate,
+                sigma=row['impliedVolatility'] if row['impliedVolatility'] > 0 else 0.5
+            ),
+            axis=1
+        )
+        
+        # Filter for OTM puts only (strike < current price)
+        puts = puts[puts['strike'] < current_price]
+        
+        if puts.empty:
+            return {"delta30_error": "No OTM puts available"}
+        
+        # Find put closest to -0.30 delta
+        puts['delta_diff'] = abs(puts['calculated_delta'] + 0.30)
+        best_idx = puts['delta_diff'].idxmin()
+        best_put = puts.loc[best_idx]
+        
+        # Calculate seller's ROI
+        bid_price = best_put['bid'] if best_put['bid'] > 0 else best_put['lastPrice'] * 0.95
+        strike = best_put['strike']
+        
+        if strike > 0 and bid_price > 0:
+            roi = (bid_price / strike) * 100
+            roi_annual = roi * (365 / dte)
+        else:
+            roi = 0
+            roi_annual = 0
+        
+        result = {
+            "delta30_strike": sanitize(strike),
+            "delta30_bid": sanitize(bid_price),
+            "delta30_delta": sanitize(best_put['calculated_delta']),
+            "delta30_iv": sanitize(best_put['impliedVolatility'] * 100),
+            "delta30_roi": sanitize(roi),
+            "delta30_roi_annual": sanitize(roi_annual),
+            "delta30_dte": dte,
+            "delta30_expiry": best_expiry
+        }
+        
+        # Cache the result
+        if use_cache and "delta30_error" not in result:
+            result["_cached"] = False
+            cache.set(cache_key, result.copy())
+        
+        return result
+        
+    except Exception as e:
+        print(f"Error getting 30 delta put for {ticker_symbol}: {e}")
+        return {"delta30_error": str(e)}
+
+
 def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
     """
     Calculate IV Rank and related volatility metrics for CSP strategy.
@@ -383,10 +533,15 @@ def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
     if use_cache:
         cached = cache.get(cache_key)
         if cached is not None:
-            cached["_cached"] = True
-            created_ts = cache.get_created_timestamp(cache_key)
-            cached["_cache_age_minutes"] = round((time_module.time() - created_ts) / 60, 1) if created_ts else 0
-            return cached
+            # Check if cache has the new delta30 fields - if not, invalidate and refetch
+            if "delta30_strike" not in cached and "delta30_error" not in cached:
+                # Stale cache without delta30 data - refetch
+                pass
+            else:
+                cached["_cached"] = True
+                created_ts = cache.get_created_timestamp(cache_key)
+                cached["_cache_age_minutes"] = round((time_module.time() - created_ts) / 60, 1) if created_ts else 0
+                return cached
     import math
     
     def sanitize(val):
@@ -421,10 +576,11 @@ def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
         else:
             hv_rank = 50  # Default if no range
         
-        # Try to get IV from options chain
+        # Try to get IV and 30-delta data from options chain (single fetch)
         current_iv = None
         iv_rank = None
         iv_hv_ratio = None
+        delta30_data = {}
         
         try:
             options_dates = stock.options
@@ -445,11 +601,13 @@ def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
                             best_expiry = exp_str
                 
                 if best_expiry:
+                    expiry_date = datetime.strptime(best_expiry, "%Y-%m-%d")
+                    actual_dte = (expiry_date - today).days
                     chain = stock.option_chain(best_expiry)
-                    puts = chain.puts
+                    puts = chain.puts.copy()
                     
                     if not puts.empty:
-                        # Find ATM put (strike closest to current price)
+                        # Find ATM put (strike closest to current price) for IV
                         puts['strike_diff'] = abs(puts['strike'] - current_price)
                         atm_put = puts.loc[puts['strike_diff'].idxmin()]
                         
@@ -461,10 +619,55 @@ def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
                             if current_hv_30 > 0:
                                 iv_hv_ratio = current_iv / current_hv_30
                             
-                            # For IV Rank, we use HV Rank as proxy since we don't have historical IV
-                            # A more sophisticated approach would store daily IV readings
-                            # For now, use current IV vs HV range as an approximation
                             iv_rank = hv_rank  # Proxy: assume IV rank tracks HV rank loosely
+                        
+                        # Calculate 30-delta put data (using same options chain)
+                        if actual_dte > 0:
+                            T = actual_dte / 365.0
+                            risk_free_rate = 0.045
+                            
+                            # Calculate delta for each put option
+                            puts['calculated_delta'] = puts.apply(
+                                lambda row: calculate_option_delta(
+                                    S=current_price,
+                                    K=row['strike'],
+                                    T=T,
+                                    r=risk_free_rate,
+                                    sigma=row['impliedVolatility'] if row['impliedVolatility'] > 0 else 0.5
+                                ),
+                                axis=1
+                            )
+                            
+                            # Filter for OTM puts only
+                            otm_puts = puts[puts['strike'] < current_price]
+                            
+                            if not otm_puts.empty:
+                                # Find put closest to -0.30 delta
+                                otm_puts = otm_puts.copy()
+                                otm_puts['delta_diff'] = abs(otm_puts['calculated_delta'] + 0.30)
+                                best_idx = otm_puts['delta_diff'].idxmin()
+                                best_put = otm_puts.loc[best_idx]
+                                
+                                bid_price = best_put['bid'] if best_put['bid'] > 0 else best_put['lastPrice'] * 0.95
+                                strike = best_put['strike']
+                                
+                                if strike > 0 and bid_price > 0:
+                                    roi = (bid_price / strike) * 100
+                                    roi_annual = roi * (365 / actual_dte)
+                                else:
+                                    roi = 0
+                                    roi_annual = 0
+                                
+                                delta30_data = {
+                                    "delta30_strike": sanitize(strike),
+                                    "delta30_bid": sanitize(bid_price),
+                                    "delta30_delta": sanitize(best_put['calculated_delta']),
+                                    "delta30_iv": sanitize(best_put['impliedVolatility'] * 100),
+                                    "delta30_roi": sanitize(roi),
+                                    "delta30_roi_annual": sanitize(roi_annual),
+                                    "delta30_dte": actual_dte,
+                                    "delta30_expiry": best_expiry
+                                }
                             
         except Exception as e:
             print(f"Options data error for {ticker_symbol}: {e}")
@@ -484,6 +687,10 @@ def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
             "iv_hv_ratio": sanitize(iv_hv_ratio),
             "recommendation": recommendation
         }
+        
+        # Merge 30-delta put data into result
+        if delta30_data:
+            result.update(delta30_data)
 
         if use_cache and "error" not in result:
              result["_cached"] = False
