@@ -2472,7 +2472,9 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
             case 'delta30_dte': return volData?.delta30_dte || 0;
             case 'delta30_expiry': return volData?.delta30_expiry || '';
             case 'delta30_strike': return volData?.delta30_strike || 0;
+            case 'delta30_last': return volData?.delta30_last || 0;
             case 'delta30_bid': return volData?.delta30_bid || 0;
+            case 'delta30_ask': return volData?.delta30_ask || 0;
             case 'delta30_roi': return volData?.delta30_roi || 0;
             case 'delta30_roi_annual': return volData?.delta30_roi_annual || 0;
             default: return 0;
@@ -2762,7 +2764,9 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                     { key: 'delta30_dte', label: 'DTE' },
                                     { key: 'delta30_expiry', label: 'Expiry' },
                                     { key: 'delta30_strike', label: '30Δ Strike' },
+                                    { key: 'delta30_last', label: '30Δ Last' },
                                     { key: 'delta30_bid', label: '30Δ Bid' },
+                                    { key: 'delta30_ask', label: '30Δ Ask' },
                                     { key: 'delta30_roi', label: 'ROI%' },
                                     { key: 'delta30_roi_annual', label: 'Ann.ROI%' }
                                 ].map(({ key, label }) => (
@@ -2973,11 +2977,27 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                         </td>
                                         <td style={{
                                             padding: '0.5rem',
+                                            fontWeight: 500,
+                                            color: '#555',
+                                            whiteSpace: 'nowrap'
+                                        }}>
+                                            {volData?.delta30_last ? `$${volData.delta30_last.toFixed(2)}` : '-'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.5rem',
                                             fontWeight: 600,
                                             color: '#2e7d32',
                                             whiteSpace: 'nowrap'
                                         }}>
                                             {volData?.delta30_bid ? `$${volData.delta30_bid.toFixed(2)}` : '-'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.5rem',
+                                            fontWeight: 500,
+                                            color: '#555',
+                                            whiteSpace: 'nowrap'
+                                        }}>
+                                            {volData?.delta30_ask !== null && volData?.delta30_ask !== undefined ? `$${volData.delta30_ask.toFixed(2)}` : '-'}
                                         </td>
                                         <td style={{
                                             padding: '0.5rem',

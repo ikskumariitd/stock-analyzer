@@ -502,6 +502,8 @@ def get_30_delta_put(ticker_symbol: str, current_price: float, use_cache: bool =
         result = {
             "delta30_strike": sanitize(strike),
             "delta30_bid": sanitize(bid_price),
+            "delta30_last": sanitize(best_put['lastPrice']),
+            "delta30_ask": sanitize(best_put['ask']),
             "delta30_delta": sanitize(best_put['calculated_delta']),
             "delta30_iv": sanitize(best_put['impliedVolatility'] * 100),
             "delta30_roi": sanitize(roi),
@@ -661,6 +663,8 @@ def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
                                 delta30_data = {
                                     "delta30_strike": sanitize(strike),
                                     "delta30_bid": sanitize(bid_price),
+                                    "delta30_last": sanitize(best_put['lastPrice']),
+                                    "delta30_ask": sanitize(best_put['ask']),
                                     "delta30_delta": sanitize(best_put['calculated_delta']),
                                     "delta30_iv": sanitize(best_put['impliedVolatility'] * 100),
                                     "delta30_roi": sanitize(roi),
