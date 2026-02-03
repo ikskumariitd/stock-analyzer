@@ -2758,9 +2758,6 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                     { key: 'rsi', label: 'RSI' },
                                     { key: 'low52', label: '52L' },
                                     { key: 'high52', label: '52H' },
-                                    { key: 'iv', label: 'IV' },
-                                    { key: 'rank', label: 'Rank' },
-                                    { key: 'rating', label: 'Rating' },
                                     { key: 'delta30_dte', label: 'DTE' },
                                     { key: 'delta30_expiry', label: 'Expiry' },
                                     { key: 'delta30_strike', label: '30Δ Strike' },
@@ -2910,44 +2907,6 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                             whiteSpace: 'nowrap'
                                         }}>
                                             {volData?.week52_high ? `$${volData.week52_high.toFixed(0)}` : 'N/A'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 600,
-                                            color: volData?.current_iv >= 40 ? '#9b59b6' : volData?.current_iv >= 25 ? '#27ae60' : '#666',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            {volData?.current_iv ? `${volData.current_iv.toFixed(1)}%` : 'N/A'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            {rank !== null && rank !== undefined ? (
-                                                <span style={{ fontWeight: 600, color: rating.color }}>
-                                                    {rank.toFixed(0)}%
-                                                </span>
-                                            ) : (
-                                                <span style={{ color: 'var(--text-secondary)' }}>N/A</span>
-                                            )}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem'
-                                        }}>
-                                            <span style={{
-                                                display: 'inline-flex',
-                                                alignItems: 'center',
-                                                gap: '0.25rem',
-                                                padding: '0.2rem 0.5rem',
-                                                borderRadius: '12px',
-                                                fontWeight: 600,
-                                                fontSize: '0.7rem',
-                                                color: rating.color,
-                                                background: `${rating.color}15`,
-                                                whiteSpace: 'nowrap'
-                                            }}>
-                                                {rating.icon} {rating.text}
-                                            </span>
                                         </td>
                                         {/* 30-Delta Put Data */}
                                         <td style={{
