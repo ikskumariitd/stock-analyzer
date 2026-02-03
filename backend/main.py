@@ -488,12 +488,12 @@ def get_30_delta_put(ticker_symbol: str, current_price: float, use_cache: bool =
         best_idx = puts['delta_diff'].idxmin()
         best_put = puts.loc[best_idx]
         
-        # Calculate seller's ROI
-        bid_price = best_put['bid'] if best_put['bid'] > 0 else best_put['lastPrice'] * 0.95
+        # Calculate seller's ROI based on Last Price
+        last_price = best_put['lastPrice']
         strike = best_put['strike']
         
-        if strike > 0 and bid_price > 0:
-            roi = (bid_price / strike) * 100
+        if strike > 0 and last_price > 0:
+            roi = (last_price / strike) * 100
             roi_annual = roi * (365 / dte)
         else:
             roi = 0
@@ -501,8 +501,8 @@ def get_30_delta_put(ticker_symbol: str, current_price: float, use_cache: bool =
         
         result = {
             "delta30_strike": sanitize(strike),
-            "delta30_bid": sanitize(bid_price),
-            "delta30_last": sanitize(best_put['lastPrice']),
+            "delta30_bid": sanitize(best_put['bid']),
+            "delta30_last": sanitize(last_price),
             "delta30_ask": sanitize(best_put['ask']),
             "delta30_delta": sanitize(best_put['calculated_delta']),
             "delta30_iv": sanitize(best_put['impliedVolatility'] * 100),
@@ -650,11 +650,12 @@ def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
                                 best_idx = otm_puts['delta_diff'].idxmin()
                                 best_put = otm_puts.loc[best_idx]
                                 
-                                bid_price = best_put['bid'] if best_put['bid'] > 0 else best_put['lastPrice'] * 0.95
+                                # Calculate ROI based on Last Price
+                                last_price = best_put['lastPrice']
                                 strike = best_put['strike']
                                 
-                                if strike > 0 and bid_price > 0:
-                                    roi = (bid_price / strike) * 100
+                                if strike > 0 and last_price > 0:
+                                    roi = (last_price / strike) * 100
                                     roi_annual = roi * (365 / actual_dte)
                                 else:
                                     roi = 0
@@ -662,8 +663,8 @@ def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
                                 
                                 delta30_data = {
                                     "delta30_strike": sanitize(strike),
-                                    "delta30_bid": sanitize(bid_price),
-                                    "delta30_last": sanitize(best_put['lastPrice']),
+                                    "delta30_bid": sanitize(best_put['bid']),
+                                    "delta30_last": sanitize(last_price),
                                     "delta30_ask": sanitize(best_put['ask']),
                                     "delta30_delta": sanitize(best_put['calculated_delta']),
                                     "delta30_iv": sanitize(best_put['impliedVolatility'] * 100),
