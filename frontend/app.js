@@ -2955,7 +2955,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                             color: '#2e7d32',
                                             whiteSpace: 'nowrap'
                                         }}>
-                                            {volData?.delta30_bid ? `$${volData.delta30_bid.toFixed(2)}` : '-'}
+                                            {volData?.delta30_bid !== null && volData?.delta30_bid !== undefined ? `$${volData.delta30_bid.toFixed(2)}` : '-'}
                                         </td>
                                         <td style={{
                                             padding: '0.5rem',

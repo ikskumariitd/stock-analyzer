@@ -536,8 +536,12 @@ def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
         cached = cache.get(cache_key)
         if cached is not None:
             # Check if cache has the new delta30 fields - if not, invalidate and refetch
-            if "delta30_strike" not in cached and "delta30_error" not in cached:
-                # Stale cache without delta30 data - refetch
+            # We now check for bid and ask as well to ensure they are present
+            required_fields = ["delta30_strike", "delta30_bid", "delta30_ask"]
+            is_stale = any(field not in cached for field in required_fields)
+            
+            if is_stale and "delta30_error" not in cached:
+                # Stale cache without full delta30 data - refetch
                 pass
             else:
                 cached["_cached"] = True
