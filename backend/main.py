@@ -1087,6 +1087,13 @@ def _analyze_ticker_cached(ticker: str, use_cache: bool = True):
         return cached
     
     # Fetch fresh data
+    if not use_cache:
+        # If explicitly refreshing, clear other related caches for this ticker
+        # This ensures volatility and csp_metrics are also fresh when next requested
+        cache.delete(f"volatility:{ticker}")
+        cache.delete(f"csp_metrics:{ticker}")
+        cache.delete(f"mystic_pulse:{ticker}")
+        
     result = _analyze_ticker(ticker)
     result["_cached"] = False
     result["_cache_age_minutes"] = 0
@@ -1231,6 +1238,13 @@ async def perform_bulk_analysis(tickers: List[str], refresh: bool = False):
         cached = None
         if not refresh:
             cached = cache.get(cache_key)
+        else:
+            # If explicitly refreshing, clear other related caches for this ticker
+            # This ensures volatility and csp_metrics are also fresh when next requested
+            cache.delete(f"volatility:{t}")
+            cache.delete(f"csp_metrics:{t}")
+            cache.delete(f"mystic_pulse:{t}")
+            
         if cached:
             cached["_cached"] = True
             cached_results[t] = cached

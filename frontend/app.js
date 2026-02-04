@@ -601,6 +601,13 @@ function App() {
             const newStockData = await response.json();
 
             if (newStockData && newStockData.length > 0) {
+                // Clear the CSP data for this stock to force a refetch in the summary table
+                setCspData(prevCsp => {
+                    const newCsp = { ...prevCsp };
+                    delete newCsp[symbol];
+                    return newCsp;
+                });
+
                 // Replace the old stock data with fresh data
                 setData(prevData => {
                     if (prevData && Array.isArray(prevData)) {
