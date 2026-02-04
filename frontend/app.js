@@ -2769,10 +2769,11 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                     { key: 'delta30_expiry', label: 'Expiry' },
                                     { key: 'delta30_strike', label: '30Δ Strike' },
                                     { key: 'delta30_last', label: '30Δ Last' },
-                                    { key: 'delta30_bid', label: '30Δ Bid' },
-                                    { key: 'delta30_ask', label: '30Δ Ask' },
-                                    { key: 'delta30_roi', label: 'ROI%' },
-                                    { key: 'delta30_roi_annual', label: 'Ann.ROI%' }
+                                    { key: 'delta30_roi_annual', label: 'Ann.ROI%' },
+                                    { key: 'nw_delta30_strike', label: 'NW Strike' },
+                                    { key: 'nw_delta30_last', label: 'NW Last' },
+                                    { key: 'nw_delta30_roi', label: 'NW ROI%' },
+                                    { key: 'nw_delta30_roi_annual', label: 'NW Ann.ROI%' }
                                 ].map(({ key, label }) => (
                                     <th
                                         key={key}
@@ -2809,7 +2810,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                         <tbody>
                             {filteredAndSortedStocks.length === 0 ? (
                                 <tr>
-                                    <td colSpan="16" style={{
+                                    <td colSpan="18" style={{
                                         textAlign: 'center',
                                         padding: '2rem',
                                         color: 'var(--text-secondary)'
@@ -2951,22 +2952,6 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                         </td>
                                         <td style={{
                                             padding: '0.5rem',
-                                            fontWeight: 600,
-                                            color: '#2e7d32',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            {volData?.delta30_bid !== null && volData?.delta30_bid !== undefined ? `$${volData.delta30_bid.toFixed(2)}` : '-'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 500,
-                                            color: '#555',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            {volData?.delta30_ask !== null && volData?.delta30_ask !== undefined ? `$${volData.delta30_ask.toFixed(2)}` : '-'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
                                             fontWeight: 700,
                                             color: volData?.delta30_roi >= 5 ? '#27ae60' : volData?.delta30_roi >= 3 ? '#f39c12' : '#666',
                                             whiteSpace: 'nowrap'
@@ -2980,6 +2965,43 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                             whiteSpace: 'nowrap'
                                         }}>
                                             {volData?.delta30_roi_annual ? `${volData.delta30_roi_annual.toFixed(0)}%` : '-'}
+                                        </td>
+                                        {/* Next Week Data */}
+                                        <td style={{
+                                            padding: '0.5rem',
+                                            fontWeight: 500,
+                                            color: '#555',
+                                            whiteSpace: 'nowrap',
+                                            background: 'rgba(102, 126, 234, 0.03)'
+                                        }}>
+                                            {volData?.nw_delta30_strike ? `$${volData.nw_delta30_strike.toFixed(0)}` : '-'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.5rem',
+                                            fontWeight: 500,
+                                            color: '#555',
+                                            whiteSpace: 'nowrap',
+                                            background: 'rgba(102, 126, 234, 0.03)'
+                                        }}>
+                                            {volData?.nw_delta30_last ? `$${volData.nw_delta30_last.toFixed(2)}` : '-'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.5rem',
+                                            fontWeight: 700,
+                                            color: volData?.nw_delta30_roi >= 2 ? '#27ae60' : volData?.nw_delta30_roi >= 1 ? '#f39c12' : '#666',
+                                            whiteSpace: 'nowrap',
+                                            background: 'rgba(102, 126, 234, 0.03)'
+                                        }}>
+                                            {volData?.nw_delta30_roi ? `${volData.nw_delta30_roi.toFixed(1)}%` : '-'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.5rem',
+                                            fontWeight: 600,
+                                            color: volData?.nw_delta30_roi_annual >= 80 ? '#9b59b6' : volData?.nw_delta30_roi_annual >= 50 ? '#27ae60' : '#666',
+                                            whiteSpace: 'nowrap',
+                                            background: 'rgba(102, 126, 234, 0.03)'
+                                        }}>
+                                            {volData?.nw_delta30_roi_annual ? `${volData.nw_delta30_roi_annual.toFixed(0)}%` : '-'}
                                         </td>
                                     </tr>
                                 );

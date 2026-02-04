@@ -536,8 +536,8 @@ def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
         cached = cache.get(cache_key)
         if cached is not None:
             # Check if cache has the new delta30 fields - if not, invalidate and refetch
-            # We now check for bid and ask as well to ensure they are present
-            required_fields = ["delta30_strike", "delta30_bid", "delta30_ask"]
+            # We now check for bid and ask as well as next week data
+            required_fields = ["delta30_strike", "delta30_bid", "delta30_ask", "nw_delta30_strike"]
             is_stale = any(field not in cached for field in required_fields)
             
             if is_stale and "delta30_error" not in cached:
@@ -678,6 +678,77 @@ def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
                                     "delta30_expiry": best_expiry
                                 }
                             
+                            # --- CALCULATE NEXT WEEK (WEEKLY) DATA ---
+                            # Target: Friday of next week (roughly 7-12 days away)
+                            target_nw_dte = 9 
+                            best_nw_expiry = None
+                            best_nw_diff = float('inf')
+
+                            for exp_str in options_dates:
+                                exp_date = datetime.strptime(exp_str, "%Y-%m-%d")
+                                dte = (exp_date - today).days
+                                # Weekly target: usually 6 to 15 days out
+                                if 6 <= dte <= 15:
+                                    diff = abs(dte - target_nw_dte)
+                                    if diff < best_nw_diff:
+                                        best_nw_diff = diff
+                                        best_nw_expiry = exp_str
+                            
+                            # Only calculate if it's different from the monthly/30d expiry
+                            if best_nw_expiry and best_nw_expiry != best_expiry:
+                                nw_expiry_date = datetime.strptime(best_nw_expiry, "%Y-%m-%d")
+                                nw_actual_dte = (nw_expiry_date - today).days
+                                nw_chain = stock.option_chain(best_nw_expiry)
+                                nw_puts = nw_chain.puts.copy()
+                                
+                                if not nw_puts.empty:
+                                    nw_T = nw_actual_dte / 365.0
+                                    nw_puts['calculated_delta'] = nw_puts.apply(
+                                        lambda row: calculate_option_delta(
+                                            S=current_price,
+                                            K=row['strike'],
+                                            T=nw_T,
+                                            r=risk_free_rate,
+                                            sigma=row['impliedVolatility'] if row['impliedVolatility'] > 0 else 0.5
+                                        ),
+                                        axis=1
+                                    )
+                                    
+                                    nw_otm = nw_puts[nw_puts['strike'] < current_price]
+                                    if not nw_otm.empty:
+                                        nw_otm = nw_otm.copy()
+                                        nw_otm['delta_diff'] = abs(nw_otm['calculated_delta'] + 0.30)
+                                        nw_best_idx = nw_otm['delta_diff'].idxmin()
+                                        nw_best_put = nw_otm.loc[nw_best_idx]
+                                        
+                                        nw_last = nw_best_put['lastPrice']
+                                        nw_strike = nw_best_put['strike']
+                                        
+                                        if nw_strike > 0 and nw_last > 0:
+                                            nw_roi = (nw_last / nw_strike) * 100
+                                            nw_roi_annual = nw_roi * (365 / nw_actual_dte)
+                                        else:
+                                            nw_roi = 0
+                                            nw_roi_annual = 0
+                                            
+                                        delta30_data.update({
+                                            "nw_delta30_strike": sanitize(nw_strike),
+                                            "nw_delta30_last": sanitize(nw_last),
+                                            "nw_delta30_roi": sanitize(nw_roi),
+                                            "nw_delta30_roi_annual": sanitize(nw_roi_annual),
+                                            "nw_delta30_dte": nw_actual_dte,
+                                            "nw_delta30_expiry": best_nw_expiry
+                                        })
+                            elif best_nw_expiry == best_expiry:
+                                # If monthly is same as next week, just mark it so frontend knows
+                                delta30_data.update({
+                                    "nw_delta30_strike": delta30_data.get("delta30_strike"),
+                                    "nw_delta30_last": delta30_data.get("delta30_last"),
+                                    "nw_delta30_roi": delta30_data.get("delta30_roi"),
+                                    "nw_delta30_roi_annual": delta30_data.get("delta30_roi_annual"),
+                                    "nw_delta30_dte": delta30_data.get("delta30_dte"),
+                                    "nw_delta30_expiry": delta30_data.get("delta30_expiry")
+                                })
         except Exception as e:
             print(f"Options data error for {ticker_symbol}: {e}")
         
