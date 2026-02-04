@@ -23,10 +23,7 @@ body {
     color: var(--text-primary);
     font-family: var(--font-main);
     min-height: 100vh;
-    display: flex;
-    justify-content: center;
     padding: 2rem;
-    overflow-x: hidden;
 }
 
 /* Scrollbar */
@@ -46,9 +43,36 @@ body {
 .container {
     width: 100%;
     max-width: 1200px;
+    margin: 0 auto;
     display: flex;
     flex-direction: column;
     gap: 2rem;
+}
+
+@media (max-width: 768px) {
+    body {
+        padding: 1rem 0.5rem;
+    }
+
+    .header h1 {
+        font-size: 2rem;
+    }
+
+    .container {
+        gap: 1rem;
+    }
+
+    .dashboard {
+        grid-template-columns: 1fr;
+    }
+
+    .search-button {
+        padding: 0 1rem;
+    }
+
+    .stock-grid {
+        gap: 1.5rem;
+    }
 }
 
 .header {
@@ -62,6 +86,7 @@ body {
     font-weight: 800;
     background: linear-gradient(135deg, #fff 0%, #a0a0b0 100%);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
     margin-bottom: 0.5rem;
     letter-spacing: -1px;
