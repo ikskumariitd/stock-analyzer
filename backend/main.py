@@ -1868,12 +1868,29 @@ async def get_csp_batch(request: CSPBatchRequest):
             vol_data = calculate_volatility_metrics(ticker, use_cache=not request.refresh)
             csp_metrics = calculate_csp_metrics(ticker, use_cache=not request.refresh)
             
+            # Fetch Ripster EMA data
+            ripster_data = calculate_ripster_metrics(ticker, use_cache=not request.refresh)
+            ripster_summary_str = "N/A"
+            ripster_trend = "neutral"
+            
+            if ripster_data and "error" not in ripster_data and "summary" in ripster_data:
+                summ = ripster_data["summary"]
+                trend_text = summ.get("overall_trend", "").replace("_", " ").title()
+                bullish = summ.get("bullish_clouds", 0)
+                total = summ.get("total_clouds", 3)
+                ripster_summary_str = f"{trend_text} ({bullish}/{total} bullish)"
+                ripster_trend = summ.get("overall_trend", "neutral")
+            
             # Merge CSP data
             csp_combined = {}
             if vol_data and "error" not in vol_data:
                 csp_combined.update(vol_data)
             if csp_metrics and "error" not in csp_metrics:
                 csp_combined.update(csp_metrics)
+            
+            # Add Ripster data
+            csp_combined["ripster_summary"] = ripster_summary_str
+            csp_combined["ripster_trend"] = ripster_trend
             
             return ticker, stock_info, csp_combined
             
