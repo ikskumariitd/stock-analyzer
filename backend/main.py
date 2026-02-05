@@ -2100,6 +2100,71 @@ async def get_mystic_pulse(ticker: str, period: str = "1y", adx_length: int = 9,
         raise HTTPException(status_code=500, detail=str(e))
 
 
+from ripster_ema import calculate_ripster_ema_clouds
+
+@app.get("/api/ripster-ema/{ticker}")
+async def get_ripster_ema(ticker: str, refresh: bool = False):
+    """
+    Get Ripster EMA Clouds indicator data for a stock.
+    
+    Uses 3 EMA cloud pairs to identify trend direction:
+    - Cloud 1: 5 & 12 EMAs (Short-term)
+    - Cloud 2: 34 & 50 EMAs (Medium-term)
+    - Cloud 3: 72 & 89 EMAs (Longer-term)
+    
+    Parameters:
+    - ticker: Stock symbol (e.g., AAPL)
+    - refresh: Force fresh data fetch, bypassing cache (default: false)
+    
+    Returns cloud states and overall trend alignment.
+    """
+    import math
+    
+    try:
+        ticker = ticker.upper().strip()
+        cache_key = f"ripster_ema:{ticker}"
+        
+        result = None
+        
+        # Check cache first (unless refresh requested)
+        if not refresh:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                cached["_cached"] = True
+                return cached
+        
+        # Fetch fresh data
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="1y")
+        
+        if hist.empty or len(hist) < 89:
+            raise HTTPException(status_code=400, detail=f"Insufficient data for {ticker}")
+        
+        # Calculate EMA clouds
+        ema_data = calculate_ripster_ema_clouds(hist)
+        
+        if "error" in ema_data:
+            raise HTTPException(status_code=400, detail=ema_data["error"])
+        
+        result = {
+            "symbol": ticker,
+            "clouds": ema_data["clouds"],
+            "summary": ema_data["summary"],
+            "_cached": False
+        }
+        
+        # Cache the result
+        cache.set(cache_key, result.copy())
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Ripster EMA error for {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @app.get("/api/market-news")
 async def get_market_news(tickers: str = ""):

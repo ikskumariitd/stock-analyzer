@@ -3123,6 +3123,8 @@ function StockAnalysis({ data, onRefresh, isRefreshing, history }) {
 
                 <InteractiveMysticPulseChart key={`pulse-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
+                <RipsterEMACloudsCard key={`ema-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
+
                 <CSPMetricsCard key={`csp-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
                 <Card title="Key Indicators">
@@ -4111,6 +4113,147 @@ function RSIVisualizer({ value }) {
 }
 
 
+
+// ============================================
+// Ripster EMA Clouds Indicator Component
+// ============================================
+function RipsterEMACloudsCard({ symbol, refreshTrigger }) {
+    const [data, setData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        setLoading(true);
+        setError(null);
+
+        const needsRefresh = refreshTrigger ? '?refresh=true' : '';
+
+        apiQueue.add(() => fetch(`/api/ripster-ema/${symbol}${needsRefresh}`).then(res => {
+            if (!res.ok) throw new Error('Failed to fetch EMA data');
+            return res.json();
+        }))
+            .then(result => {
+                setData(result);
+                setLoading(false);
+            })
+            .catch(err => {
+                setError(err.message);
+                setLoading(false);
+            });
+    }, [symbol, refreshTrigger]);
+
+    const getCloudLabel = (name) => {
+        switch (name) {
+            case 'short_term': return 'Short (5/12)';
+            case 'medium_term': return 'Medium (34/50)';
+            case 'long_term': return 'Long (72/89)';
+            default: return name;
+        }
+    };
+
+    const getStateStyle = (state) => {
+        switch (state) {
+            case 'bullish':
+                return { color: '#16a34a', icon: '🟢', bg: 'rgba(22, 163, 74, 0.1)' };
+            case 'bearish':
+                return { color: '#dc2626', icon: '🔴', bg: 'rgba(220, 38, 38, 0.1)' };
+            default:
+                return { color: '#6b7280', icon: '⚪', bg: 'rgba(107, 114, 128, 0.1)' };
+        }
+    };
+
+    const getTrendStyle = (trend) => {
+        switch (trend) {
+            case 'strong_bullish':
+                return { color: '#16a34a', text: 'Strong Bullish', icon: '🚀' };
+            case 'bullish':
+                return { color: '#22c55e', text: 'Bullish', icon: '📈' };
+            case 'strong_bearish':
+                return { color: '#dc2626', text: 'Strong Bearish', icon: '📉' };
+            case 'bearish':
+                return { color: '#ef4444', text: 'Bearish', icon: '🔻' };
+            default:
+                return { color: '#6b7280', text: 'Mixed', icon: '➖' };
+        }
+    };
+
+    if (loading) {
+        return (
+            <Card title="EMA Clouds">
+                <div style={{ height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+                    Loading EMA clouds...
+                </div>
+            </Card>
+        );
+    }
+
+    if (error || !data) {
+        return (
+            <Card title="EMA Clouds">
+                <div style={{ height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+                    EMA data unavailable
+                </div>
+            </Card>
+        );
+    }
+
+    const trendStyle = getTrendStyle(data.summary?.overall_trend);
+
+    return (
+        <Card title="Ripster EMA Clouds">
+            {/* Overall Trend */}
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0.5rem 0.75rem',
+                background: 'rgba(255,255,255,0.03)',
+                borderRadius: '8px',
+                marginBottom: '0.75rem'
+            }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Trend Alignment</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontSize: '1.1rem' }}>{trendStyle.icon}</span>
+                    <span style={{ fontWeight: 600, color: trendStyle.color }}>{trendStyle.text}</span>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        ({data.summary?.bullish_clouds}/{data.summary?.total_clouds})
+                    </span>
+                </div>
+            </div>
+
+            {/* Cloud Status Grid */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {data.clouds?.map((cloud, idx) => {
+                    const stateStyle = getStateStyle(cloud.state);
+                    return (
+                        <div key={idx} style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '0.5rem 0.75rem',
+                            background: stateStyle.bg,
+                            borderRadius: '6px',
+                            borderLeft: `3px solid ${stateStyle.color}`
+                        }}>
+                            <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                                {getCloudLabel(cloud.name)}
+                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                    {cloud.ema_fast?.toFixed(1)} / {cloud.ema_slow?.toFixed(1)}
+                                </span>
+                                <span style={{ fontSize: '0.9rem' }}>{stateStyle.icon}</span>
+                                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: stateStyle.color, textTransform: 'capitalize' }}>
+                                    {cloud.state}
+                                </span>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </Card>
+    );
+}
 
 
 // ============================================
