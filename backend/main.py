@@ -2150,6 +2150,7 @@ async def get_ripster_ema(ticker: str, refresh: bool = False):
             "symbol": ticker,
             "clouds": ema_data["clouds"],
             "summary": ema_data["summary"],
+            "timeseries": ema_data.get("timeseries", []),
             "_cached": False
         }
         

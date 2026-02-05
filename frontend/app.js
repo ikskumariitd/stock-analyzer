@@ -4118,6 +4118,8 @@ function RSIVisualizer({ value }) {
 // Ripster EMA Clouds Indicator Component
 // ============================================
 function RipsterEMACloudsCard({ symbol, refreshTrigger }) {
+    const chartContainerRef = React.useRef(null);
+    const chartRef = React.useRef(null);
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -4142,25 +4144,115 @@ function RipsterEMACloudsCard({ symbol, refreshTrigger }) {
             });
     }, [symbol, refreshTrigger]);
 
-    const getCloudLabel = (name) => {
-        switch (name) {
-            case 'short_term': return 'Short (5/12)';
-            case 'medium_term': return 'Medium (34/50)';
-            case 'long_term': return 'Long (72/89)';
-            default: return name;
-        }
-    };
+    // Create chart when data is available
+    useEffect(() => {
+        if (!chartContainerRef.current || !data?.timeseries?.length) return;
 
-    const getStateStyle = (state) => {
-        switch (state) {
-            case 'bullish':
-                return { color: '#16a34a', icon: '🟢', bg: 'rgba(22, 163, 74, 0.1)' };
-            case 'bearish':
-                return { color: '#dc2626', icon: '🔴', bg: 'rgba(220, 38, 38, 0.1)' };
-            default:
-                return { color: '#6b7280', icon: '⚪', bg: 'rgba(107, 114, 128, 0.1)' };
+        // Clean up previous chart
+        if (chartRef.current) {
+            try { chartRef.current.remove(); } catch (e) { }
+            chartRef.current = null;
         }
-    };
+
+        // Create new chart
+        const chart = LightweightCharts.createChart(chartContainerRef.current, {
+            width: chartContainerRef.current.clientWidth,
+            height: 200,
+            layout: {
+                background: { type: 'solid', color: 'transparent' },
+                textColor: '#9ca3af',
+            },
+            grid: {
+                vertLines: { color: 'rgba(255, 255, 255, 0.03)' },
+                horzLines: { color: 'rgba(255, 255, 255, 0.03)' },
+            },
+            rightPriceScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+            },
+            timeScale: {
+                borderColor: 'rgba(255, 255, 255, 0.1)',
+                timeVisible: false,
+            },
+            handleScroll: false,
+            handleScale: false,
+        });
+
+        chartRef.current = chart;
+
+        const ts = data.timeseries;
+
+        // Cloud 1: Short-term (5/12 EMAs) - Blue fill
+        const ema5Series = chart.addLineSeries({
+            color: 'rgba(59, 130, 246, 0.9)',
+            lineWidth: 2,
+            priceLineVisible: false,
+            lastValueVisible: false,
+        });
+        const ema12Series = chart.addLineSeries({
+            color: 'rgba(96, 165, 250, 0.7)',
+            lineWidth: 1,
+            priceLineVisible: false,
+            lastValueVisible: false,
+        });
+        ema5Series.setData(ts.filter(d => d.ema_5 != null).map(d => ({ time: d.date, value: d.ema_5 })));
+        ema12Series.setData(ts.filter(d => d.ema_12 != null).map(d => ({ time: d.date, value: d.ema_12 })));
+
+        // Cloud 2: Medium-term (34/50 EMAs) - Green fill
+        const ema34Series = chart.addLineSeries({
+            color: 'rgba(34, 197, 94, 0.9)',
+            lineWidth: 2,
+            priceLineVisible: false,
+            lastValueVisible: false,
+        });
+        const ema50Series = chart.addLineSeries({
+            color: 'rgba(74, 222, 128, 0.7)',
+            lineWidth: 1,
+            priceLineVisible: false,
+            lastValueVisible: false,
+        });
+        ema34Series.setData(ts.filter(d => d.ema_34 != null).map(d => ({ time: d.date, value: d.ema_34 })));
+        ema50Series.setData(ts.filter(d => d.ema_50 != null).map(d => ({ time: d.date, value: d.ema_50 })));
+
+        // Cloud 3: Long-term (72/89 EMAs) - Orange fill
+        const ema72Series = chart.addLineSeries({
+            color: 'rgba(251, 146, 60, 0.9)',
+            lineWidth: 2,
+            priceLineVisible: false,
+            lastValueVisible: false,
+        });
+        const ema89Series = chart.addLineSeries({
+            color: 'rgba(253, 186, 116, 0.7)',
+            lineWidth: 1,
+            priceLineVisible: false,
+            lastValueVisible: false,
+        });
+        ema72Series.setData(ts.filter(d => d.ema_72 != null).map(d => ({ time: d.date, value: d.ema_72 })));
+        ema89Series.setData(ts.filter(d => d.ema_89 != null).map(d => ({ time: d.date, value: d.ema_89 })));
+
+        // Price line (thin white)
+        const priceSeries = chart.addLineSeries({
+            color: 'rgba(255, 255, 255, 0.8)',
+            lineWidth: 1,
+            priceLineVisible: false,
+            lastValueVisible: true,
+        });
+        priceSeries.setData(ts.filter(d => d.close != null).map(d => ({ time: d.date, value: d.close })));
+
+        chart.timeScale().fitContent();
+
+        // Handle resize
+        const resizeObserver = new ResizeObserver(() => {
+            if (chartContainerRef.current) {
+                chart.applyOptions({ width: chartContainerRef.current.clientWidth });
+            }
+        });
+        resizeObserver.observe(chartContainerRef.current);
+
+        return () => {
+            resizeObserver.disconnect();
+            try { chart.remove(); } catch (e) { }
+        };
+    }, [data]);
 
     const getTrendStyle = (trend) => {
         switch (trend) {
@@ -4180,7 +4272,7 @@ function RipsterEMACloudsCard({ symbol, refreshTrigger }) {
     if (loading) {
         return (
             <Card title="EMA Clouds">
-                <div style={{ height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+                <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
                     Loading EMA clouds...
                 </div>
             </Card>
@@ -4190,7 +4282,7 @@ function RipsterEMACloudsCard({ symbol, refreshTrigger }) {
     if (error || !data) {
         return (
             <Card title="EMA Clouds">
-                <div style={{ height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+                <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
                     EMA data unavailable
                 </div>
             </Card>
@@ -4201,59 +4293,54 @@ function RipsterEMACloudsCard({ symbol, refreshTrigger }) {
 
     return (
         <Card title="Ripster EMA Clouds">
-            {/* Overall Trend */}
+            {/* Trend Summary Header */}
             <div style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '0.5rem 0.75rem',
+                padding: '0.4rem 0.75rem',
                 background: 'rgba(255,255,255,0.03)',
                 borderRadius: '8px',
-                marginBottom: '0.75rem'
+                marginBottom: '0.5rem'
             }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Trend Alignment</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{ fontSize: '1.1rem' }}>{trendStyle.icon}</span>
-                    <span style={{ fontWeight: 600, color: trendStyle.color }}>{trendStyle.text}</span>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                        ({data.summary?.bullish_clouds}/{data.summary?.total_clouds})
+                    <span style={{ fontSize: '1rem' }}>{trendStyle.icon}</span>
+                    <span style={{ fontWeight: 600, color: trendStyle.color, fontSize: '0.9rem' }}>{trendStyle.text}</span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        ({data.summary?.bullish_clouds}/{data.summary?.total_clouds} bullish)
+                    </span>
+                </div>
+                {/* Legend */}
+                <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                        <span style={{ width: '10px', height: '3px', background: '#3b82f6', borderRadius: '1px' }}></span>
+                        5/12
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                        <span style={{ width: '10px', height: '3px', background: '#22c55e', borderRadius: '1px' }}></span>
+                        34/50
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                        <span style={{ width: '10px', height: '3px', background: '#fb923c', borderRadius: '1px' }}></span>
+                        72/89
                     </span>
                 </div>
             </div>
 
-            {/* Cloud Status Grid */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {data.clouds?.map((cloud, idx) => {
-                    const stateStyle = getStateStyle(cloud.state);
-                    return (
-                        <div key={idx} style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            padding: '0.5rem 0.75rem',
-                            background: stateStyle.bg,
-                            borderRadius: '6px',
-                            borderLeft: `3px solid ${stateStyle.color}`
-                        }}>
-                            <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>
-                                {getCloudLabel(cloud.name)}
-                            </span>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                                    {cloud.ema_fast?.toFixed(1)} / {cloud.ema_slow?.toFixed(1)}
-                                </span>
-                                <span style={{ fontSize: '0.9rem' }}>{stateStyle.icon}</span>
-                                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: stateStyle.color, textTransform: 'capitalize' }}>
-                                    {cloud.state}
-                                </span>
-                            </div>
-                        </div>
-                    );
-                })}
-            </div>
+            {/* Chart Container */}
+            <div
+                ref={chartContainerRef}
+                style={{
+                    width: '100%',
+                    height: '200px',
+                    borderRadius: '8px',
+                    overflow: 'hidden'
+                }}
+            />
         </Card>
     );
 }
+
 
 
 // ============================================

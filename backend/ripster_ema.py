@@ -9,6 +9,7 @@ Calculates 3 EMA cloud pairs to identify trend direction and momentum:
 
 import pandas as pd
 import pandas_ta as ta
+import math
 
 
 # EMA Cloud Configurations: (fast_period, slow_period, name)
@@ -30,9 +31,23 @@ def calculate_ripster_ema_clouds(hist: pd.DataFrame) -> dict:
         dict with:
         - clouds: list of cloud data with ema_fast, ema_slow, state (bullish/bearish)
         - summary: overall trend alignment info
+        - timeseries: list of data points with date and all 6 EMA values for charting
     """
     if hist.empty or len(hist) < 89:  # Need at least 89 periods for longest EMA
-        return {"error": "Insufficient data", "clouds": [], "summary": {}}
+        return {"error": "Insufficient data", "clouds": [], "summary": {}, "timeseries": []}
+    
+    def sanitize(val):
+        if val is None or (isinstance(val, float) and (math.isnan(val) or math.isinf(val))):
+            return None
+        return round(float(val), 2)
+    
+    # Calculate all EMAs
+    ema_5 = ta.ema(hist['Close'], length=5)
+    ema_12 = ta.ema(hist['Close'], length=12)
+    ema_34 = ta.ema(hist['Close'], length=34)
+    ema_50 = ta.ema(hist['Close'], length=50)
+    ema_72 = ta.ema(hist['Close'], length=72)
+    ema_89 = ta.ema(hist['Close'], length=89)
     
     clouds = []
     bullish_count = 0
@@ -88,7 +103,25 @@ def calculate_ripster_ema_clouds(hist: pd.DataFrame) -> dict:
         "overall_trend": overall_trend,
     }
     
+    # Build time-series data for charting (last 200 data points)
+    timeseries = []
+    start_idx = max(0, len(hist) - 200)
+    
+    for i in range(start_idx, len(hist)):
+        date = hist.index[i]
+        timeseries.append({
+            "date": date.strftime("%Y-%m-%d"),
+            "close": sanitize(hist['Close'].iloc[i]),
+            "ema_5": sanitize(ema_5.iloc[i]) if ema_5 is not None else None,
+            "ema_12": sanitize(ema_12.iloc[i]) if ema_12 is not None else None,
+            "ema_34": sanitize(ema_34.iloc[i]) if ema_34 is not None else None,
+            "ema_50": sanitize(ema_50.iloc[i]) if ema_50 is not None else None,
+            "ema_72": sanitize(ema_72.iloc[i]) if ema_72 is not None else None,
+            "ema_89": sanitize(ema_89.iloc[i]) if ema_89 is not None else None,
+        })
+    
     return {
         "clouds": clouds,
         "summary": summary,
+        "timeseries": timeseries,
     }
