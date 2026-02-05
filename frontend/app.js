@@ -2484,6 +2484,10 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
             case 'delta30_ask': return volData?.delta30_ask || 0;
             case 'delta30_roi': return volData?.delta30_roi || 0;
             case 'delta30_roi_annual': return volData?.delta30_roi_annual || 0;
+            case 'nw_delta30_strike': return volData?.nw_delta30_strike || 0;
+            case 'nw_delta30_last': return volData?.nw_delta30_last || 0;
+            case 'nw_delta30_roi': return volData?.nw_delta30_roi || 0;
+            case 'nw_delta30_roi_annual': return volData?.nw_delta30_roi_annual || 0;
             default: return 0;
         }
     };
@@ -2520,13 +2524,13 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
             const valA = getSortValue(a, sortColumn);
             const valB = getSortValue(b, sortColumn);
 
-            if (sortColumn === 'symbol') {
+            if (sortColumn === 'symbol' || sortColumn === 'company' || sortColumn === 'delta30_expiry') {
                 return sortDirection === 'asc'
-                    ? valA.localeCompare(valB)
-                    : valB.localeCompare(valA);
+                    ? (valA || '').toString().localeCompare((valB || '').toString())
+                    : (valB || '').toString().localeCompare((valA || '').toString());
             }
 
-            return sortDirection === 'asc' ? valA - valB : valB - valA;
+            return sortDirection === 'asc' ? (valA || 0) - (valB || 0) : (valB || 0) - (valA || 0);
         });
 
     // Reset filters
@@ -2769,6 +2773,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                     { key: 'delta30_expiry', label: 'Expiry' },
                                     { key: 'delta30_strike', label: '30Δ Strike' },
                                     { key: 'delta30_last', label: '30Δ Last' },
+                                    { key: 'delta30_roi', label: 'ROI%' },
                                     { key: 'delta30_roi_annual', label: 'Ann.ROI%' },
                                     { key: 'nw_delta30_strike', label: 'NW Strike' },
                                     { key: 'nw_delta30_last', label: 'NW Last' },
@@ -2810,7 +2815,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                         <tbody>
                             {filteredAndSortedStocks.length === 0 ? (
                                 <tr>
-                                    <td colSpan="18" style={{
+                                    <td colSpan="17" style={{
                                         textAlign: 'center',
                                         padding: '2rem',
                                         color: 'var(--text-secondary)'
