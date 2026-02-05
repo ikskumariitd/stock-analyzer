@@ -2381,50 +2381,37 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
             // Only show loading if we actually need to fetch something
             setLoading(true);
 
-            // Fetch MISSING stocks in parallel
-            const fetchPromises = missingStocks.map(async (stock) => {
-                try {
-                    // Fetch both volatility and CSP metrics in parallel
-                    const [volRes, metricsRes] = await Promise.all([
-                        fetch(`/api/volatility/${stock.symbol}`),
-                        fetch(`/api/csp-metrics/${stock.symbol}`)
-                    ]);
+            try {
+                // Use batch endpoint for efficiency and to get all metrics (including Ripster EMA)
+                const tickers = missingStocks.map(s => s.symbol);
+                const res = await fetch('/api/csp-batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tickers })
+                });
 
-                    const volData = volRes.ok ? await volRes.json() : {};
-                    const metricsData = metricsRes.ok ? await metricsRes.json() : {};
+                if (res.ok) {
+                    const result = await res.json();
 
-                    return {
-                        symbol: stock.symbol,
-                        data: { ...volData, ...metricsData }
-                    };
-                } catch (e) {
-                    console.error(`Failed to fetch CSP data for ${stock.symbol}`);
-                    return { symbol: stock.symbol, data: {} };
+                    // Update cache with new data
+                    if (setCachedData) {
+                        setCachedData(prevCache => ({
+                            ...prevCache,
+                            ...result.csp_data
+                        }));
+                    } else {
+                        // Fallback if no cache setter provided (local state only)
+                        setCspData(prev => ({
+                            ...prev,
+                            ...result.csp_data
+                        }));
+                    }
                 }
-            });
-
-            // Wait for new fetches
-            const newResults = await Promise.all(fetchPromises);
-
-            // Update cache with new data
-            if (setCachedData) {
-                setCachedData(prevCache => {
-                    const newCache = { ...prevCache };
-                    newResults.forEach(({ symbol, data }) => {
-                        newCache[symbol] = data;
-                    });
-                    return newCache;
-                });
-            } else {
-                // Fallback if no cache setter provided (local state only)
-                const newLocalData = { ...cspData };
-                newResults.forEach(({ symbol, data }) => {
-                    newLocalData[symbol] = data;
-                });
-                setCspData(newLocalData);
+            } catch (e) {
+                console.error("Batch CSP fetch failed", e);
+            } finally {
+                setLoading(false);
             }
-
-            setLoading(false);
         };
 
         if (stocks && stocks.length > 0) {
