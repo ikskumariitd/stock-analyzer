@@ -2764,6 +2764,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                 {[
                                     { key: 'symbol', label: 'Symbol' },
                                     { key: 'company', label: 'Company' },
+                                    { key: 'ripster', label: 'Ripster EMA' },
                                     { key: 'price', label: 'Price' },
                                     { key: 'change', label: '1D Chg' },
                                     { key: 'rsi', label: 'RSI' },
@@ -2815,7 +2816,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                         <tbody>
                             {filteredAndSortedStocks.length === 0 ? (
                                 <tr>
-                                    <td colSpan="17" style={{
+                                    <td colSpan="18" style={{
                                         textAlign: 'center',
                                         padding: '2rem',
                                         color: 'var(--text-secondary)'
@@ -2866,6 +2867,16 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                             whiteSpace: 'nowrap'
                                         }} title={stock.name}>
                                             {stock.name || '-'}
+                                        </td>
+                                        <td style={{
+                                            padding: '0.5rem',
+                                            fontSize: '0.8rem',
+                                            fontWeight: 500,
+                                            color: volData?.ripster_trend?.includes('bullish') ? '#27ae60' :
+                                                volData?.ripster_trend?.includes('bearish') ? '#e74c3c' : '#555',
+                                            whiteSpace: 'nowrap'
+                                        }}>
+                                            {volData?.ripster_summary || '-'}
                                         </td>
                                         <td style={{
                                             padding: '0.5rem',

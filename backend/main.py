@@ -1780,12 +1780,29 @@ async def get_csp_batch(request: CSPBatchRequest):
             vol_data = calculate_volatility_metrics(ticker, use_cache=not request.refresh)
             csp_metrics = calculate_csp_metrics(ticker, use_cache=not request.refresh)
             
+            # Fetch Ripster EMA data
+            ripster_data = calculate_ripster_metrics(ticker, use_cache=not request.refresh)
+            ripster_summary_str = "N/A"
+            ripster_trend = "neutral"
+            
+            if ripster_data and "error" not in ripster_data and "summary" in ripster_data:
+                summ = ripster_data["summary"]
+                trend_text = summ.get("overall_trend", "").replace("_", " ").title()
+                bullish = summ.get("bullish_clouds", 0)
+                total = summ.get("total_clouds", 3)
+                ripster_summary_str = f"{trend_text} ({bullish}/{total} bullish)"
+                ripster_trend = summ.get("overall_trend", "neutral")
+            
             # Merge CSP data
             csp_combined = {}
             if vol_data and "error" not in vol_data:
                 csp_combined.update(vol_data)
             if csp_metrics and "error" not in csp_metrics:
                 csp_combined.update(csp_metrics)
+            
+            # Add Ripster data
+            csp_combined["ripster_summary"] = ripster_summary_str
+            csp_combined["ripster_trend"] = ripster_trend
             
             return stock_info, csp_combined
             
@@ -2118,36 +2135,42 @@ async def get_ripster_ema(ticker: str, refresh: bool = False):
     
     Returns cloud states and overall trend alignment.
     """
-    import math
+    result = calculate_ripster_metrics(ticker, use_cache=not refresh)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+def calculate_ripster_metrics(ticker_symbol: str, use_cache: bool = True):
+    """
+    Calculate Ripster EMA metrics with caching support.
+    Returns dict with clouds, summary, and timeseries.
+    """
+    ticker_symbol = ticker_symbol.upper().strip()
+    cache_key = f"ripster_ema:{ticker_symbol}"
     
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            cached["_cached"] = True
+            return cached
+            
     try:
-        ticker = ticker.upper().strip()
-        cache_key = f"ripster_ema:{ticker}"
-        
-        result = None
-        
-        # Check cache first (unless refresh requested)
-        if not refresh:
-            cached = cache.get(cache_key)
-            if cached is not None:
-                cached["_cached"] = True
-                return cached
-        
-        # Fetch fresh data
-        stock = yf.Ticker(ticker)
+        stock = yf.Ticker(ticker_symbol)
+        # We need at least 89 periods + some buffer
         hist = stock.history(period="1y")
         
         if hist.empty or len(hist) < 89:
-            raise HTTPException(status_code=400, detail=f"Insufficient data for {ticker}")
+            return {"error": f"Insufficient data for {ticker_symbol}"}
         
         # Calculate EMA clouds
         ema_data = calculate_ripster_ema_clouds(hist)
         
         if "error" in ema_data:
-            raise HTTPException(status_code=400, detail=ema_data["error"])
+            return {"error": ema_data["error"]}
         
         result = {
-            "symbol": ticker,
+            "symbol": ticker_symbol,
             "clouds": ema_data["clouds"],
             "summary": ema_data["summary"],
             "timeseries": ema_data.get("timeseries", []),
@@ -2159,11 +2182,9 @@ async def get_ripster_ema(ticker: str, refresh: bool = False):
         
         return result
         
-    except HTTPException:
-        raise
     except Exception as e:
-        print(f"Ripster EMA error for {ticker}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Ripster calculation error for {ticker_symbol}: {e}")
+        return {"error": str(e)}
 
 
 
