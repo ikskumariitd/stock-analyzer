@@ -2455,6 +2455,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
         switch (column) {
             case 'symbol': return stock.symbol || '';
             case 'company': return stock.name || '';
+            case 'ripster': return volData?.ripster_summary || '';
             case 'price': return stock.price || 0;
             case 'change': return stock.change_1d_pct || 0;
             case 'rsi': return stock.indicators?.RSI || 0;
@@ -2511,7 +2512,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
             const valA = getSortValue(a, sortColumn);
             const valB = getSortValue(b, sortColumn);
 
-            if (sortColumn === 'symbol' || sortColumn === 'company' || sortColumn === 'delta30_expiry') {
+            if (sortColumn === 'symbol' || sortColumn === 'company' || sortColumn === 'delta30_expiry' || sortColumn === 'ripster') {
                 return sortDirection === 'asc'
                     ? (valA || '').toString().localeCompare((valB || '').toString())
                     : (valB || '').toString().localeCompare((valA || '').toString());
