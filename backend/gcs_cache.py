@@ -95,15 +95,21 @@ class GCSCache:
         return False
 
     def clear(self):
-        """Clear all blobs in the bucket."""
+        """Clear all blobs in the bucket, EXCEPT persistent data."""
         self._ensure_client()
         if not self._bucket:
             return 0
             
         count = 0
+        protected_files = {"watchlist.json", "favorites.json"}
+        
         try:
             blobs = list(self._client.list_blobs(self.bucket_name))
             for blob in blobs:
+                if blob.name in protected_files:
+                    print(f"Skipping protected file: {blob.name}")
+                    continue
+                    
                 blob.delete()
                 count += 1
         except Exception as e:

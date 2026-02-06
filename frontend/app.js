@@ -3,7 +3,7 @@ const { useState, useEffect } = React;
 // ============================================
 // Cache Control Component
 // ============================================
-function CacheControl() {
+function CacheControl({ onClear }) {
     const [clearing, setClearing] = useState(false);
     const [stats, setStats] = useState(null);
     const [showDetails, setShowDetails] = useState(false);
@@ -29,6 +29,7 @@ function CacheControl() {
                 // Show success message
                 alert(`✅ Cache cleared!\n\n${data.cleared_entries} entries removed.\nFresh data will be fetched on next load.`);
                 fetchStats(); // Refresh stats
+                if (onClear) onClear();
             }
         } catch (e) {
             alert('❌ Failed to clear cache. Please try again.');
@@ -715,7 +716,13 @@ function App() {
                     >
                         🔍 Stock Details
                     </button>
-                    <CacheControl />
+                    <CacheControl onClear={() => {
+                        // Clear all local data states to reflect backend clear
+                        setData(null);
+                        setCspData({});
+                        setSp100Data([]);
+                        setWatchlistVersion(v => v + 1); // Force watchlist refresh check
+                    }} />
                 </div>
             </header>
 
