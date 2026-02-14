@@ -2403,12 +2403,22 @@ async def send_email_report(request: EmailRequest):
                         <tr>
                             <th>Symbol</th>
                             <th>Company</th>
+                            <th>Ripster EMA</th>
                             <th>Price</th>
                             <th>1D Change</th>
                             <th>RSI</th>
                             <th>52W Low</th>
                             <th>52W High</th>
-                            <th>IV/HV Rank</th>
+                            <th>DTE</th>
+                            <th>Expiry</th>
+                            <th>30&Delta; Strike</th>
+                            <th>30&Delta; Last</th>
+                            <th>ROI%</th>
+                            <th>Ann.ROI%</th>
+                            <th>NW Strike</th>
+                            <th>NW Last</th>
+                            <th>NW ROI%</th>
+                            <th>NW Ann.ROI%</th>
                             <th>CSP Rating</th>
                         </tr>
                     </thead>
@@ -2441,6 +2451,22 @@ async def send_email_report(request: EmailRequest):
             vol_data = csp_data.get(symbol, {})
             week52_low = vol_data.get('week52_low')
             week52_high = vol_data.get('week52_high')
+            ripster_summary = vol_data.get('ripster_summary', 'N/A')
+            
+            # 30-Delta Metrics
+            delta30_dte = vol_data.get('delta30_dte', 'N/A')
+            delta30_expiry = vol_data.get('delta30_expiry', 'N/A')
+            delta30_strike = vol_data.get('delta30_strike', 'N/A')
+            delta30_last = vol_data.get('delta30_last', 'N/A')
+            delta30_roi = vol_data.get('delta30_roi', 0)
+            delta30_roi_annual = vol_data.get('delta30_roi_annual', 0)
+            
+            # Next Week Metrics
+            nw_strike = vol_data.get('nw_delta30_strike', 'N/A')
+            nw_last = vol_data.get('nw_delta30_last', 'N/A')
+            nw_roi = vol_data.get('nw_delta30_roi', 0)
+            nw_roi_annual = vol_data.get('nw_delta30_roi_annual', 0)
+
             iv_rank = vol_data.get('iv_rank')
             hv_rank = vol_data.get('hv_rank')
             rank = iv_rank if iv_rank is not None else hv_rank
@@ -2461,18 +2487,42 @@ async def send_email_report(request: EmailRequest):
             change_class = "positive" if change_1d >= 0 else "negative"
             change_sign = "+" if change_1d >= 0 else ""
             
+            # safe format helper
+            def fmt(val, is_currency=False, is_pct=False):
+                if val == 'N/A' or val is None: return 'N/A'
+                try:
+                    v = float(val)
+                    if is_currency: return f"${v:.2f}"
+                    if is_pct: return f"{v:.1f}%"
+                    return f"{v:.2f}"
+                except: return str(val)
+
             html_content += f"""
                 <tr>
-                            <td><strong>{symbol}</strong></td>
-                            <td style="font-size: 0.9em; color: #555;">{stock.get('name', symbol)}</td>
-                            <td>${price:.2f}</td>
-                            <td class="{change_class}">{change_sign}{change_1d:.2f} ({change_sign}{change_1d_pct:.2f}%)</td>
-                            <td>{f'{rsi:.1f}' if rsi else 'N/A'}</td>
-                            <td>{f'${week52_low:.2f}' if week52_low else 'N/A'}</td>
-                            <td>{f'${week52_high:.2f}' if week52_high else 'N/A'}</td>
-                            <td>{f'{rank:.0f}%' if rank else 'N/A'}</td>
-                            <td class="{rating_class}">{rating_text}</td>
-                        </tr>
+                    <td><strong>{symbol}</strong></td>
+                    <td style="font-size: 0.9em; color: #555;">{stock.get('name', symbol)}</td>
+                    <td style="font-size: 0.85em;">{ripster_summary}</td>
+                    <td>${price:.2f}</td>
+                    <td class="{change_class}">{change_sign}{change_1d:.2f} ({change_sign}{change_1d_pct:.2f}%)</td>
+                    <td>{f'{rsi:.1f}' if rsi else 'N/A'}</td>
+                    <td>{f'${week52_low:.2f}' if week52_low else 'N/A'}</td>
+                    <td>{f'${week52_high:.2f}' if week52_high else 'N/A'}</td>
+                    
+                    <!-- New Columns -->
+                    <td>{delta30_dte}</td>
+                    <td style="font-size: 0.85em;">{delta30_expiry}</td>
+                    <td>{fmt(delta30_strike, is_currency=True)}</td>
+                    <td>{fmt(delta30_last, is_currency=True)}</td>
+                    <td style="font-weight: bold; color: #27ae60;">{fmt(delta30_roi, is_pct=True)}</td>
+                    <td style="color: #27ae60;">{fmt(delta30_roi_annual, is_pct=True)}</td>
+                    
+                    <td>{fmt(nw_strike, is_currency=True)}</td>
+                    <td>{fmt(nw_last, is_currency=True)}</td>
+                    <td style="font-weight: bold; color: #2980b9;">{fmt(nw_roi, is_pct=True)}</td>
+                    <td style="color: #2980b9;">{fmt(nw_roi_annual, is_pct=True)}</td>
+
+                    <td class="{rating_class}">{rating_text}</td>
+                </tr>
             """
         
         html_content += """
@@ -2554,7 +2604,18 @@ async def scheduled_email_report():
                 symbol = stock['symbol']
                 vol_result = calculate_volatility_metrics(symbol)
                 metrics_result = calculate_csp_metrics(symbol)
-                return (symbol, {**vol_result, **metrics_result})
+                
+                # Fetch Ripster data
+                ripster_result = calculate_ripster_metrics(symbol)
+                ripster_summary_str = "N/A"
+                if ripster_result and "error" not in ripster_result and "summary" in ripster_result:
+                    summ = ripster_result["summary"]
+                    trend_text = summ.get("overall_trend", "").replace("_", " ").title()
+                    bullish = summ.get("bullish_clouds", 0)
+                    total = summ.get("total_clouds", 3)
+                    ripster_summary_str = f"{trend_text} ({bullish}/{total} bullish)"
+
+                return (symbol, {**vol_result, **metrics_result, "ripster_summary": ripster_summary_str})
             except Exception as e:
                 print(f"Error fetching CSP data for {stock.get('symbol')}: {e}")
                 return None

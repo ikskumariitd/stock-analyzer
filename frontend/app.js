@@ -740,6 +740,7 @@ function App() {
                     <FavoritesSection
                         onAnalyzeAll={handleAnalyzeAll}
                         analyzedStocks={analyzedStocks}
+                        onAddStock={handleAddStock}
                         disabled={loading || addingStock}
                     />
 
@@ -1055,7 +1056,7 @@ function WatchlistTags({ onAddStock, onAnalyzeAll, analyzedStocks = [], disabled
 
 
 
-function FavoritesSection({ onAnalyzeAll, analyzedStocks = [], disabled }) {
+function FavoritesSection({ onAnalyzeAll, analyzedStocks = [], onAddStock, disabled }) {
     const [favorites, setFavorites] = useState([]);
     const [loading, setLoading] = useState(true);
     const [input, setInput] = useState('');
@@ -1238,11 +1239,27 @@ function FavoritesSection({ onAnalyzeAll, analyzedStocks = [], disabled }) {
                     {favorites.map(symbol => {
                         const isAnalyzed = analyzedStocks.includes(symbol);
                         return (
-                            <div key={symbol} className={`favorite-item ${isAnalyzed ? 'analyzed' : ''}`}>
+                            <div
+                                key={symbol}
+                                className={`favorite-item ${isAnalyzed ? 'analyzed' : ''}`}
+                                onClick={() => {
+                                    if (!isAnalyzed && !disabled && onAddStock) {
+                                        onAddStock(symbol);
+                                    }
+                                }}
+                                style={{
+                                    cursor: isAnalyzed ? 'default' : 'pointer',
+                                    transition: 'all 0.2s ease'
+                                }}
+                                title={isAnalyzed ? "Already analyzed" : "Click to analyze"}
+                            >
                                 <span className="fav-symbol">{symbol}</span>
                                 <button
                                     className="remove-fav-btn"
-                                    onClick={() => handleRemoveFavorite(symbol)}
+                                    onClick={(e) => {
+                                        e.stopPropagation(); // Prevent triggering analysis
+                                        handleRemoveFavorite(symbol);
+                                    }}
                                     disabled={disabled}
                                     title="Remove from favorites"
                                 >
