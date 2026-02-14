@@ -231,7 +231,18 @@ app.mount("/static", StaticFiles(directory=frontend_path), name="static")
 
 @app.get("/")
 async def read_root():
-    return FileResponse(os.path.join(frontend_path, "index.html"))
+    from starlette.responses import HTMLResponse
+    import time as _time
+    html_path = os.path.join(frontend_path, "index.html")
+    with open(html_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    # Add cache-busting to app.js
+    content = content.replace('/static/app.js', f'/static/app.js?v={int(_time.time())}')
+    return HTMLResponse(content, headers={
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
+    })
 
 # ============================================
 # Cache Management Endpoints
