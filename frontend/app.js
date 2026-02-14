@@ -2754,292 +2754,316 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                 }}>
                     Analyzing volatility data...
                 </div>
-            ) : (
-                <div style={{
-                    overflowX: 'auto',
-                    WebkitOverflowScrolling: 'touch',
-                    marginLeft: '-0.5rem',
-                    marginRight: '-0.5rem',
-                    paddingLeft: '0.5rem',
-                    paddingRight: '0.5rem'
-                }}>
-                    <table style={{
-                        width: '100%',
-                        minWidth: '700px',
-                        borderCollapse: 'collapse',
-                        fontSize: '0.85rem'
-                    }}>
-                        <thead>
-                            <tr style={{
-                                borderBottom: '2px solid rgba(0, 0, 0, 0.1)'
+            ) : (() => {
+                const topScrollRef = React.useRef(null);
+                const bottomScrollRef = React.useRef(null);
+                const isSyncing = React.useRef(false);
+                const syncScroll = (source, target) => {
+                    if (isSyncing.current) return;
+                    isSyncing.current = true;
+                    if (target.current) target.current.scrollLeft = source.current.scrollLeft;
+                    requestAnimationFrame(() => { isSyncing.current = false; });
+                };
+                return (
+                    <div>
+                        {/* Top horizontal scrollbar */}
+                        <div ref={topScrollRef} onScroll={() => syncScroll(topScrollRef, bottomScrollRef)} style={{
+                            overflowX: 'auto',
+                            marginLeft: '-0.5rem',
+                            marginRight: '-0.5rem',
+                            paddingLeft: '0.5rem',
+                            paddingRight: '0.5rem',
+                            marginBottom: '-1px'
+                        }}>
+                            <div style={{ minWidth: '1600px', height: '1px' }} />
+                        </div>
+                        {/* Table container with bottom scrollbar */}
+                        <div ref={bottomScrollRef} onScroll={() => syncScroll(bottomScrollRef, topScrollRef)} style={{
+                            overflowX: 'auto',
+                            WebkitOverflowScrolling: 'touch',
+                            marginLeft: '-0.5rem',
+                            marginRight: '-0.5rem',
+                            paddingLeft: '0.5rem',
+                            paddingRight: '0.5rem'
+                        }}>
+                            <table style={{
+                                width: '100%',
+                                minWidth: '1600px',
+                                borderCollapse: 'collapse',
+                                fontSize: '0.85rem'
                             }}>
-                                {[
-                                    { key: 'symbol', label: 'Symbol' },
-                                    { key: 'company', label: 'Company' },
-                                    { key: 'ripster', label: 'Ripster EMA' },
-                                    { key: 'price', label: 'Price' },
-                                    { key: 'change', label: '1D Chg' },
-                                    { key: 'rsi', label: 'RSI' },
-                                    { key: 'low52', label: '52L' },
-                                    { key: 'high52', label: '52H' },
-                                    { key: 'delta30_dte', label: 'DTE' },
-                                    { key: 'delta30_expiry', label: 'Expiry' },
-                                    { key: 'delta30_strike', label: '30Δ Strike' },
-                                    { key: 'delta30_last', label: '30Δ Last' },
-                                    { key: 'delta30_roi', label: 'ROI%' },
-                                    { key: 'delta30_roi_annual', label: 'Ann.ROI%' },
-                                    { key: 'nw_delta30_strike', label: 'NW Strike' },
-                                    { key: 'nw_delta30_last', label: 'NW Last' },
-                                    { key: 'nw_delta30_roi', label: 'NW ROI%' },
-                                    { key: 'nw_delta30_roi_annual', label: 'NW Ann.ROI%' }
-                                ].map(({ key, label }) => (
-                                    <th
-                                        key={key}
-                                        onClick={() => handleSort(key)}
-                                        style={{
-                                            textAlign: 'left',
-                                            padding: '0.5rem 0.5rem',
-                                            color: sortColumn === key ? '#667eea' : '#555',
-                                            fontWeight: 600,
-                                            fontSize: '0.75rem',
-                                            textTransform: 'uppercase',
-                                            letterSpacing: '0.3px',
-                                            cursor: 'pointer',
-                                            userSelect: 'none',
-                                            transition: 'color 0.2s ease',
-                                            whiteSpace: 'nowrap'
-                                        }}
-                                    >
-                                        {label}
-                                        <span style={{
-                                            marginLeft: '2px',
-                                            opacity: sortColumn === key ? 1 : 0.3,
-                                            fontSize: '0.65rem'
-                                        }}>
-                                            {sortColumn === key
-                                                ? (sortDirection === 'asc' ? '▲' : '▼')
-                                                : '⇅'
-                                            }
-                                        </span>
-                                    </th>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filteredAndSortedStocks.length === 0 ? (
-                                <tr>
-                                    <td colSpan="18" style={{
-                                        textAlign: 'center',
-                                        padding: '2rem',
-                                        color: 'var(--text-secondary)'
+                                <thead>
+                                    <tr style={{
+                                        borderBottom: '2px solid rgba(0, 0, 0, 0.1)'
                                     }}>
-                                        No stocks match your filters. Try adjusting your criteria.
-                                    </td>
-                                </tr>
-                            ) : filteredAndSortedStocks.map((stock, idx) => {
-                                const volData = cspData[stock.symbol];
-                                const rating = getCSPRating(volData);
-                                const rank = volData?.iv_rank ?? volData?.hv_rank;
-
-                                return (
-                                    <tr
-                                        key={stock.symbol}
-                                        style={{
-                                            borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
-                                            transition: 'background 0.2s ease',
-                                            cursor: 'pointer',
-                                            background: idx === 0 && rating.text === 'Excellent'
-                                                ? 'rgba(155, 89, 182, 0.08)'
-                                                : 'transparent'
-                                        }}
-                                        onClick={() => {
-                                            const element = document.getElementById(`stock-${stock.symbol}`);
-                                            if (element) {
-                                                element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                            }
-                                        }}
-                                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(0, 0, 0, 0.03)'}
-                                        onMouseLeave={(e) => e.currentTarget.style.background = idx === 0 && rating.text === 'Excellent' ? 'rgba(155, 89, 182, 0.08)' : 'transparent'}
-                                    >
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 700,
-                                            fontSize: '0.9rem',
-                                            color: '#1a1a2e'
-                                        }}>
-                                            {stock.symbol}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontSize: '0.8rem',
-                                            color: '#555',
-                                            maxWidth: '150px',
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis',
-                                            whiteSpace: 'nowrap'
-                                        }} title={stock.name}>
-                                            {stock.name || '-'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontSize: '0.8rem',
-                                            fontWeight: 500,
-                                            color: volData?.ripster_trend?.includes('bullish') ? '#27ae60' :
-                                                volData?.ripster_trend?.includes('bearish') ? '#e74c3c' : '#555',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            {volData?.ripster_summary || '-'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 600,
-                                            color: '#2e7d32',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            ${stock.price?.toFixed(2) || 'N/A'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 600,
-                                            color: stock.change_1d >= 0 ? '#27ae60' : '#e74c3c',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            {stock.change_1d !== null && stock.change_1d !== undefined ? (
-                                                <>
-                                                    {stock.change_1d_pct >= 0 ? '+' : ''}{stock.change_1d_pct?.toFixed(1)}%
-                                                </>
-                                            ) : 'N/A'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem'
-                                        }}>
-                                            {(() => {
-                                                const rsi = stock.indicators?.RSI;
-                                                if (rsi === null || rsi === undefined) {
-                                                    return <span style={{ color: '#999' }}>N/A</span>;
-                                                }
-                                                let rsiColor = '#666';
-                                                if (rsi > 70) rsiColor = '#e74c3c';
-                                                else if (rsi < 30) rsiColor = '#27ae60';
-                                                return (
-                                                    <span style={{ fontWeight: 600, color: rsiColor }}>
-                                                        {rsi.toFixed(0)}
-                                                    </span>
-                                                );
-                                            })()}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 500,
-                                            color: '#27ae60',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            {volData?.week52_low ? `$${volData.week52_low.toFixed(0)}` : 'N/A'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 500,
-                                            color: '#e74c3c',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            {volData?.week52_high ? `$${volData.week52_high.toFixed(0)}` : 'N/A'}
-                                        </td>
-                                        {/* 30-Delta Put Data */}
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 600,
-                                            color: '#667eea',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            {volData?.delta30_dte ? `${volData.delta30_dte}d` : '-'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 500,
-                                            color: '#555',
-                                            whiteSpace: 'nowrap',
-                                            fontSize: '0.75rem'
-                                        }}>
-                                            {volData?.delta30_expiry || '-'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 500,
-                                            color: '#555',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            {volData?.delta30_strike ? `$${volData.delta30_strike.toFixed(0)}` : '-'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 500,
-                                            color: '#555',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            {volData?.delta30_last ? `$${volData.delta30_last.toFixed(2)}` : '-'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 700,
-                                            color: volData?.delta30_roi >= 5 ? '#27ae60' : volData?.delta30_roi >= 3 ? '#f39c12' : '#666',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            {volData?.delta30_roi ? `${volData.delta30_roi.toFixed(1)}%` : '-'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 600,
-                                            color: volData?.delta30_roi_annual >= 50 ? '#9b59b6' : volData?.delta30_roi_annual >= 30 ? '#27ae60' : '#666',
-                                            whiteSpace: 'nowrap'
-                                        }}>
-                                            {volData?.delta30_roi_annual ? `${volData.delta30_roi_annual.toFixed(0)}%` : '-'}
-                                        </td>
-                                        {/* Next Week Data */}
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 500,
-                                            color: '#555',
-                                            whiteSpace: 'nowrap',
-                                            background: 'rgba(102, 126, 234, 0.03)'
-                                        }}>
-                                            {volData?.nw_delta30_strike ? `$${volData.nw_delta30_strike.toFixed(0)}` : '-'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 500,
-                                            color: '#555',
-                                            whiteSpace: 'nowrap',
-                                            background: 'rgba(102, 126, 234, 0.03)'
-                                        }}>
-                                            {volData?.nw_delta30_last ? `$${volData.nw_delta30_last.toFixed(2)}` : '-'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 700,
-                                            color: volData?.nw_delta30_roi >= 2 ? '#27ae60' : volData?.nw_delta30_roi >= 1 ? '#f39c12' : '#666',
-                                            whiteSpace: 'nowrap',
-                                            background: 'rgba(102, 126, 234, 0.03)'
-                                        }}>
-                                            {volData?.nw_delta30_roi ? `${volData.nw_delta30_roi.toFixed(1)}%` : '-'}
-                                        </td>
-                                        <td style={{
-                                            padding: '0.5rem',
-                                            fontWeight: 600,
-                                            color: volData?.nw_delta30_roi_annual >= 80 ? '#9b59b6' : volData?.nw_delta30_roi_annual >= 50 ? '#27ae60' : '#666',
-                                            whiteSpace: 'nowrap',
-                                            background: 'rgba(102, 126, 234, 0.03)'
-                                        }}>
-                                            {volData?.nw_delta30_roi_annual ? `${volData.nw_delta30_roi_annual.toFixed(0)}%` : '-'}
-                                        </td>
+                                        {[
+                                            { key: 'symbol', label: 'Symbol' },
+                                            { key: 'company', label: 'Company' },
+                                            { key: 'ripster', label: 'Ripster EMA' },
+                                            { key: 'price', label: 'Price' },
+                                            { key: 'change', label: '1D Chg' },
+                                            { key: 'rsi', label: 'RSI' },
+                                            { key: 'low52', label: '52L' },
+                                            { key: 'high52', label: '52H' },
+                                            { key: 'delta30_dte', label: 'DTE' },
+                                            { key: 'delta30_expiry', label: 'Expiry' },
+                                            { key: 'delta30_strike', label: '30Δ Strike' },
+                                            { key: 'delta30_last', label: '30Δ Last' },
+                                            { key: 'delta30_roi', label: 'ROI%' },
+                                            { key: 'delta30_roi_annual', label: 'Ann.ROI%' },
+                                            { key: 'nw_delta30_strike', label: 'NW Strike' },
+                                            { key: 'nw_delta30_last', label: 'NW Last' },
+                                            { key: 'nw_delta30_roi', label: 'NW ROI%' },
+                                            { key: 'nw_delta30_roi_annual', label: 'NW Ann.ROI%' }
+                                        ].map(({ key, label }) => (
+                                            <th
+                                                key={key}
+                                                onClick={() => handleSort(key)}
+                                                style={{
+                                                    textAlign: 'left',
+                                                    padding: '0.5rem 0.5rem',
+                                                    color: sortColumn === key ? '#667eea' : '#555',
+                                                    fontWeight: 600,
+                                                    fontSize: '0.75rem',
+                                                    textTransform: 'uppercase',
+                                                    letterSpacing: '0.3px',
+                                                    cursor: 'pointer',
+                                                    userSelect: 'none',
+                                                    transition: 'color 0.2s ease',
+                                                    whiteSpace: 'nowrap'
+                                                }}
+                                            >
+                                                {label}
+                                                <span style={{
+                                                    marginLeft: '2px',
+                                                    opacity: sortColumn === key ? 1 : 0.3,
+                                                    fontSize: '0.65rem'
+                                                }}>
+                                                    {sortColumn === key
+                                                        ? (sortDirection === 'asc' ? '▲' : '▼')
+                                                        : '⇅'
+                                                    }
+                                                </span>
+                                            </th>
+                                        ))}
                                     </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table >
-                </div >
-            )
-            }
-        </div >
+                                </thead>
+                                <tbody>
+                                    {filteredAndSortedStocks.length === 0 ? (
+                                        <tr>
+                                            <td colSpan="18" style={{
+                                                textAlign: 'center',
+                                                padding: '2rem',
+                                                color: 'var(--text-secondary)'
+                                            }}>
+                                                No stocks match your filters. Try adjusting your criteria.
+                                            </td>
+                                        </tr>
+                                    ) : filteredAndSortedStocks.map((stock, idx) => {
+                                        const volData = cspData[stock.symbol];
+                                        const rating = getCSPRating(volData);
+                                        const rank = volData?.iv_rank ?? volData?.hv_rank;
+
+                                        return (
+                                            <tr
+                                                key={stock.symbol}
+                                                style={{
+                                                    borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
+                                                    transition: 'background 0.2s ease',
+                                                    cursor: 'pointer',
+                                                    background: idx === 0 && rating.text === 'Excellent'
+                                                        ? 'rgba(155, 89, 182, 0.08)'
+                                                        : 'transparent'
+                                                }}
+                                                onClick={() => {
+                                                    const element = document.getElementById(`stock-${stock.symbol}`);
+                                                    if (element) {
+                                                        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                                    }
+                                                }}
+                                                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(0, 0, 0, 0.03)'}
+                                                onMouseLeave={(e) => e.currentTarget.style.background = idx === 0 && rating.text === 'Excellent' ? 'rgba(155, 89, 182, 0.08)' : 'transparent'}
+                                            >
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 700,
+                                                    fontSize: '0.9rem',
+                                                    color: '#1a1a2e'
+                                                }}>
+                                                    {stock.symbol}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontSize: '0.8rem',
+                                                    color: '#555',
+                                                    maxWidth: '150px',
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis',
+                                                    whiteSpace: 'nowrap'
+                                                }} title={stock.name}>
+                                                    {stock.name || '-'}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: 500,
+                                                    color: volData?.ripster_trend?.includes('bullish') ? '#27ae60' :
+                                                        volData?.ripster_trend?.includes('bearish') ? '#e74c3c' : '#555',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    {volData?.ripster_summary || '-'}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 600,
+                                                    color: '#2e7d32',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    ${stock.price?.toFixed(2) || 'N/A'}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 600,
+                                                    color: stock.change_1d >= 0 ? '#27ae60' : '#e74c3c',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    {stock.change_1d !== null && stock.change_1d !== undefined ? (
+                                                        <>
+                                                            {stock.change_1d_pct >= 0 ? '+' : ''}{stock.change_1d_pct?.toFixed(1)}%
+                                                        </>
+                                                    ) : 'N/A'}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem'
+                                                }}>
+                                                    {(() => {
+                                                        const rsi = stock.indicators?.RSI;
+                                                        if (rsi === null || rsi === undefined) {
+                                                            return <span style={{ color: '#999' }}>N/A</span>;
+                                                        }
+                                                        let rsiColor = '#666';
+                                                        if (rsi > 70) rsiColor = '#e74c3c';
+                                                        else if (rsi < 30) rsiColor = '#27ae60';
+                                                        return (
+                                                            <span style={{ fontWeight: 600, color: rsiColor }}>
+                                                                {rsi.toFixed(0)}
+                                                            </span>
+                                                        );
+                                                    })()}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 500,
+                                                    color: '#27ae60',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    {volData?.week52_low ? `$${volData.week52_low.toFixed(0)}` : 'N/A'}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 500,
+                                                    color: '#e74c3c',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    {volData?.week52_high ? `$${volData.week52_high.toFixed(0)}` : 'N/A'}
+                                                </td>
+                                                {/* 30-Delta Put Data */}
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 600,
+                                                    color: '#667eea',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    {volData?.delta30_dte ? `${volData.delta30_dte}d` : '-'}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 500,
+                                                    color: '#555',
+                                                    whiteSpace: 'nowrap',
+                                                    fontSize: '0.75rem'
+                                                }}>
+                                                    {volData?.delta30_expiry || '-'}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 500,
+                                                    color: '#555',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    {volData?.delta30_strike ? `$${volData.delta30_strike.toFixed(0)}` : '-'}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 500,
+                                                    color: '#555',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    {volData?.delta30_last ? `$${volData.delta30_last.toFixed(2)}` : '-'}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 700,
+                                                    color: volData?.delta30_roi >= 5 ? '#27ae60' : volData?.delta30_roi >= 3 ? '#f39c12' : '#666',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    {volData?.delta30_roi ? `${volData.delta30_roi.toFixed(1)}%` : '-'}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 600,
+                                                    color: volData?.delta30_roi_annual >= 50 ? '#9b59b6' : volData?.delta30_roi_annual >= 30 ? '#27ae60' : '#666',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    {volData?.delta30_roi_annual ? `${volData.delta30_roi_annual.toFixed(0)}%` : '-'}
+                                                </td>
+                                                {/* Next Week Data */}
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 500,
+                                                    color: '#555',
+                                                    whiteSpace: 'nowrap',
+                                                    background: 'rgba(102, 126, 234, 0.03)'
+                                                }}>
+                                                    {volData?.nw_delta30_strike ? `$${volData.nw_delta30_strike.toFixed(0)}` : '-'}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 500,
+                                                    color: '#555',
+                                                    whiteSpace: 'nowrap',
+                                                    background: 'rgba(102, 126, 234, 0.03)'
+                                                }}>
+                                                    {volData?.nw_delta30_last ? `$${volData.nw_delta30_last.toFixed(2)}` : '-'}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 700,
+                                                    color: volData?.nw_delta30_roi >= 2 ? '#27ae60' : volData?.nw_delta30_roi >= 1 ? '#f39c12' : '#666',
+                                                    whiteSpace: 'nowrap',
+                                                    background: 'rgba(102, 126, 234, 0.03)'
+                                                }}>
+                                                    {volData?.nw_delta30_roi ? `${volData.nw_delta30_roi.toFixed(1)}%` : '-'}
+                                                </td>
+                                                <td style={{
+                                                    padding: '0.5rem',
+                                                    fontWeight: 600,
+                                                    color: volData?.nw_delta30_roi_annual >= 80 ? '#9b59b6' : volData?.nw_delta30_roi_annual >= 50 ? '#27ae60' : '#666',
+                                                    whiteSpace: 'nowrap',
+                                                    background: 'rgba(102, 126, 234, 0.03)'
+                                                }}>
+                                                    {volData?.nw_delta30_roi_annual ? `${volData.nw_delta30_roi_annual.toFixed(0)}%` : '-'}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                );
+            })()}
+        </div>
     );
 }
 
