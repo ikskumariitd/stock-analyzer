@@ -152,8 +152,8 @@ class RequestQueue {
     }
 }
 
-// Create a global queue instance limiting to 3 concurrent requests
-const apiQueue = new RequestQueue(3);
+// Create a global queue instance limiting to 6 concurrent requests
+const apiQueue = new RequestQueue(6);
 
 function SP100Page({ data = [], setData }) {
     const [stocks, setStocks] = useState(data); // Initialize with passed data
@@ -485,7 +485,8 @@ function App() {
     };
 
     // Analyze all stocks from a list (for "Analyze All" button)
-    // CSP-First Loading: Fetch CSP data first (fast), then full analysis in background
+    // Parallel Loading: Fire CSP and full analysis requests simultaneously
+    // CSP data arrives first and populates the table; full analysis replaces lightweight entries
     const handleAnalyzeAll = async (tickers) => {
         if (!tickers || tickers.length === 0) return;
 
@@ -496,25 +497,24 @@ function App() {
         if (newTickers.length === 0) return;
 
         setLoading(true);
+        setLoadingFullAnalysis(true);
         setError(null);
 
         try {
-            // STEP 1: Fetch CSP data first (lightweight, fast)
-            const cspResponse = await fetch('/api/csp-batch', {
+            // Fire BOTH requests in parallel — CSP (fast) and full analysis (slower)
+            const cspPromise = fetch('/api/csp-batch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ tickers: newTickers })
-            });
+            }).then(async (res) => {
+                if (!res.ok) return null;
+                const cspResult = await res.json();
 
-            if (cspResponse.ok) {
-                const cspResult = await cspResponse.json();
-
-                // Set minimal stock data from CSP response to show table immediately
+                // Process CSP data immediately when it arrives
                 if (cspResult.stocks && cspResult.stocks.length > 0) {
-                    // Mark as lightweight data (not full analysis)
                     const lightweightStocks = cspResult.stocks.map(s => ({
                         ...s,
-                        _lightweight: true, // Flag for incomplete data
+                        _lightweight: true,
                         sentiment: { mood: 'Loading...', description: 'Full analysis in progress...' },
                         summary: 'Loading detailed analysis...'
                     }));
@@ -526,43 +526,42 @@ function App() {
                         return lightweightStocks;
                     });
 
-                    // Set CSP data cache
                     if (cspResult.csp_data) {
                         setCspData(prevCsp => ({ ...prevCsp, ...cspResult.csp_data }));
                     }
                 }
-            }
 
-            // CSP table is now visible - stop showing main loading indicator
-            setLoading(false);
+                // CSP table is now visible - stop showing main loading indicator
+                setLoading(false);
+                return cspResult;
+            }).catch(err => {
+                console.error('CSP batch fetch failed:', err);
+                setLoading(false);
+                return null;
+            });
 
-            // STEP 2: Fetch full analysis in background
-            setLoadingFullAnalysis(true);
-
-            const response = await fetch('/api/analyze-batch', {
+            const analyzePromise = fetch('/api/analyze-batch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ tickers: newTickers })
+            }).then(async (res) => {
+                if (!res.ok) throw new Error('Failed to fetch full stock data');
+                return await res.json();
             });
 
-            if (!response.ok) {
-                throw new Error('Failed to fetch full stock data');
-            }
-
-            const newStockData = await response.json();
+            // Wait for both to complete (CSP may have already finished and updated UI)
+            const [, newStockData] = await Promise.all([cspPromise, analyzePromise]);
 
             if (newStockData && newStockData.length > 0) {
                 // Replace lightweight data with full data
                 setData(prevData => {
                     if (!prevData || !Array.isArray(prevData)) return newStockData;
 
-                    // Create a map of new full data
                     const fullDataMap = {};
                     newStockData.forEach(s => {
                         if (s && s.symbol) fullDataMap[s.symbol] = s;
                     });
 
-                    // Replace lightweight entries with full data, keep others
                     const updated = prevData.map(s => {
                         if (fullDataMap[s.symbol]) {
                             return { ...fullDataMap[s.symbol], _lightweight: false };
@@ -570,7 +569,6 @@ function App() {
                         return s;
                     });
 
-                    // Add any new stocks not in prevData
                     const existingSymbols = updated.map(s => s.symbol);
                     const addNew = newStockData.filter(s => !existingSymbols.includes(s.symbol));
 
@@ -2362,6 +2360,7 @@ function Dashboard({ data, onRefreshStock, refreshingStock, onRefreshAll, refres
                         onRefresh={onRefreshStock}
                         isRefreshing={refreshingStock === stock.symbol}
                         history={historyData[stock.symbol]}
+                        cspData={cspData[stock.symbol]}
                     />
                 ))}
             </div>
@@ -3067,7 +3066,7 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
     );
 }
 
-function StockAnalysis({ data, onRefresh, isRefreshing, history }) {
+function StockAnalysis({ data, onRefresh, isRefreshing, history, cspData }) {
     if (data.error) {
         return (
             <div className="stock-grid-item" style={{ borderColor: 'var(--danger)' }}>
@@ -3166,13 +3165,13 @@ function StockAnalysis({ data, onRefresh, isRefreshing, history }) {
                     )}
                 </Card>
 
-                <VolatilityCard key={`vol-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
+                <VolatilityCard key={`vol-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} initialData={cspData} />
 
                 <InteractiveMysticPulseChart key={`pulse-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
                 <RipsterEMACloudsCard key={`ema-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
 
-                <CSPMetricsCard key={`csp-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} />
+                <CSPMetricsCard key={`csp-${data.symbol}-${data._lastRefreshed || 0}`} symbol={data.symbol} refreshTrigger={data._lastRefreshed} initialData={cspData} />
 
                 <Card title="Key Indicators">
                     {isLightweight ? (
@@ -3218,12 +3217,19 @@ function StockAnalysis({ data, onRefresh, isRefreshing, history }) {
     );
 }
 
-function VolatilityCard({ symbol, refreshTrigger }) {
+function VolatilityCard({ symbol, refreshTrigger, initialData }) {
     const [volData, setVolData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
     useEffect(() => {
+        // If pre-fetched data is available (from csp-batch) and not a manual refresh, use it
+        if (initialData && initialData.hv_30 !== undefined && !refreshTrigger) {
+            setVolData(initialData);
+            setLoading(false);
+            return;
+        }
+
         setLoading(true);
         setError(null);
 
@@ -3242,7 +3248,7 @@ function VolatilityCard({ symbol, refreshTrigger }) {
                 setError(err.message);
                 setLoading(false);
             });
-    }, [symbol]);
+    }, [symbol, refreshTrigger]);
 
     if (loading) {
         return (
@@ -3409,12 +3415,19 @@ function IVRankGauge({ ivRank, hvRank, currentIV, hv30, ivHvRatio }) {
     );
 }
 
-function CSPMetricsCard({ symbol, refreshTrigger }) {
+function CSPMetricsCard({ symbol, refreshTrigger, initialData }) {
     const [cspData, setCspData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
     useEffect(() => {
+        // If pre-fetched data is available (from csp-batch) and not a manual refresh, use it
+        if (initialData && initialData.atr_14 !== undefined && !refreshTrigger) {
+            setCspData(initialData);
+            setLoading(false);
+            return;
+        }
+
         setLoading(true);
         setError(null);
 
@@ -3433,7 +3446,7 @@ function CSPMetricsCard({ symbol, refreshTrigger }) {
                 setError(err.message);
                 setLoading(false);
             });
-    }, [symbol]);
+    }, [symbol, refreshTrigger]);
 
     if (loading) {
         return (

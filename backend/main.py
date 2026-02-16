@@ -535,10 +535,14 @@ def get_30_delta_put(ticker_symbol: str, current_price: float, use_cache: bool =
         return {"delta30_error": str(e)}
 
 
-def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
+def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True, hist_data=None, stock_obj=None):
     """
     Calculate IV Rank and related volatility metrics for CSP strategy.
     Returns dict with current_iv, iv_rank, hv_30, hv_rank, iv_hv_ratio, and recommendation.
+    
+    Optional params for bulk optimization:
+    - hist_data: Pre-fetched DataFrame of historical prices (skips yf.Ticker.history call)
+    - stock_obj: Pre-created yf.Ticker object (skips yf.Ticker creation)
     """
     ticker_symbol = ticker_symbol.upper().strip()
     cache_key = f"volatility:{ticker_symbol}"
@@ -569,10 +573,10 @@ def calculate_volatility_metrics(ticker_symbol: str, use_cache: bool = True):
         return round(val, 2) if isinstance(val, float) else val
     
     try:
-        stock = yf.Ticker(ticker_symbol)
+        stock = stock_obj if stock_obj else yf.Ticker(ticker_symbol)
         
-        # Get 1 year of historical data for HV calculations
-        hist = stock.history(period="1y")
+        # Use pre-fetched history if provided, otherwise fetch
+        hist = hist_data if hist_data is not None else stock.history(period="1y")
         if hist.empty or len(hist) < 60:
             return {"error": "Insufficient historical data for volatility calculation"}
         
@@ -822,9 +826,13 @@ def generate_csp_recommendation(current_iv, iv_rank, hv_rank, iv_hv_ratio):
         return f"🔴 Poor for CSP - Low IV ({rank:.0f}%). {ratio_text}Premium is thin."
 
 
-def calculate_csp_metrics(ticker_symbol: str, use_cache: bool = True):
+def calculate_csp_metrics(ticker_symbol: str, use_cache: bool = True, hist_data=None, stock_obj=None):
     """
     Calculate CSP-specific metrics: 52-week range, ATR, support/resistance, earnings.
+    
+    Optional params for bulk optimization:
+    - hist_data: Pre-fetched DataFrame of historical prices (skips yf.Ticker.history call)
+    - stock_obj: Pre-created yf.Ticker object (skips yf.Ticker creation)
     """
     ticker_symbol = ticker_symbol.upper().strip()
     cache_key = f"csp:{ticker_symbol}"
@@ -846,11 +854,11 @@ def calculate_csp_metrics(ticker_symbol: str, use_cache: bool = True):
         return round(val, 2) if isinstance(val, float) else val
     
     try:
-        stock = yf.Ticker(ticker_symbol)
+        stock = stock_obj if stock_obj else yf.Ticker(ticker_symbol)
         info = stock.info
         
-        # Get historical data for calculations
-        hist = stock.history(period="1y")
+        # Use pre-fetched history if provided, otherwise fetch
+        hist = hist_data if hist_data is not None else stock.history(period="1y")
         if hist.empty or len(hist) < 20:
             return {"error": "Insufficient historical data"}
         
@@ -1742,16 +1750,48 @@ async def get_csp_batch(request: CSPBatchRequest):
     results = []
     csp_data = {}
     
-
-
-    # Simpler sync approach - works better for yfinance
-    def fetch_stock_csp_data_sync(ticker: str):
-        """Sync version for thread pool."""
+    # ======= BULK HISTORY PRE-FETCH =======
+    # Single yf.download() call for all tickers instead of N*4 individual calls
+    print(f"  Bulk downloading 1y history for {len(tickers)} tickers...")
+    bulk_start = time_module.time()
+    try:
+        bulk_hist = yf.download(tickers, period="1y", group_by='ticker', threads=True)
+    except Exception as e:
+        print(f"  Bulk download failed: {e}, falling back to individual fetches")
+        bulk_hist = pd.DataFrame()
+    print(f"  Bulk download completed in {time_module.time() - bulk_start:.2f}s")
+    
+    def _extract_ticker_hist(ticker, bulk_data, num_tickers):
+        """Extract a single ticker's history from bulk download result."""
         try:
+            if bulk_data.empty:
+                return pd.DataFrame()
+            if num_tickers == 1:
+                if isinstance(bulk_data.columns, pd.MultiIndex):
+                    if ticker in bulk_data.columns.levels[0]:
+                        return bulk_data[ticker].dropna(how='all')
+                return bulk_data.dropna(how='all')
+            else:
+                if isinstance(bulk_data.columns, pd.MultiIndex) and ticker in bulk_data.columns.levels[0]:
+                    return bulk_data[ticker].dropna(how='all')
+            return pd.DataFrame()
+        except Exception:
+            return pd.DataFrame()
+
+    def fetch_stock_csp_data_sync(ticker: str):
+        """Sync version for thread pool — uses pre-fetched bulk history."""
+        try:
+            # Extract pre-fetched history for this ticker
+            hist = _extract_ticker_hist(ticker, bulk_hist, len(tickers))
+            
+            # Create a single stock object to share across sub-functions
             stock = yf.Ticker(ticker)
             
-            # Get recent history for price and RSI
-            hist = stock.history(period="3mo")
+            # Fallback: if bulk download missed this ticker, fetch individually
+            if hist.empty:
+                print(f"  Fallback: individual fetch for {ticker}")
+                hist = stock.history(period="1y")
+            
             if hist.empty:
                 return None
             
@@ -1768,8 +1808,9 @@ async def get_csp_batch(request: CSPBatchRequest):
             
             # Calculate RSI
             import pandas_ta as ta
-            hist['RSI'] = ta.rsi(hist['Close'], length=14)
-            rsi = hist['RSI'].iloc[-1] if not hist['RSI'].empty else None
+            hist_copy = hist.copy()
+            hist_copy['RSI'] = ta.rsi(hist_copy['Close'], length=14)
+            rsi = hist_copy['RSI'].iloc[-1] if not hist_copy['RSI'].empty else None
             
             # Get company name
             name = POPULAR_STOCKS.get(ticker, None)
@@ -1790,11 +1831,11 @@ async def get_csp_batch(request: CSPBatchRequest):
                 }
             }
             
-            # Fetch CSP-specific data (volatility and metrics)
-            vol_data = calculate_volatility_metrics(ticker, use_cache=not request.refresh)
-            csp_metrics = calculate_csp_metrics(ticker, use_cache=not request.refresh)
+            # Pass pre-fetched hist and stock object to avoid redundant fetches
+            vol_data = calculate_volatility_metrics(ticker, use_cache=not request.refresh, hist_data=hist, stock_obj=stock)
+            csp_metrics = calculate_csp_metrics(ticker, use_cache=not request.refresh, hist_data=hist, stock_obj=stock)
             
-            # Fetch Ripster EMA data
+            # Fetch Ripster EMA data (uses its own history period, keep as-is)
             ripster_data = calculate_ripster_metrics(ticker, use_cache=not request.refresh)
             ripster_summary_str = "N/A"
             ripster_trend = "neutral"
@@ -1824,7 +1865,7 @@ async def get_csp_batch(request: CSPBatchRequest):
             print(f"CSP batch error for {ticker}: {e}")
             return ticker, None, {}
     
-    # Use thread pool for parallel fetching
+    # Use thread pool for parallel processing (each thread now uses pre-fetched data)
     with ThreadPoolExecutor(max_workers=min(len(tickers), 20)) as executor:
         fetch_results = list(executor.map(fetch_stock_csp_data_sync, tickers))
     
@@ -1835,7 +1876,8 @@ async def get_csp_batch(request: CSPBatchRequest):
                 results.append(stock_info)
                 csp_data[ticker] = csp_combined
     
-    print(f"CSP batch completed in {time_module.time() - start_time:.2f}s for {len(results)} stocks")
+    elapsed = time_module.time() - start_time
+    print(f"CSP batch completed in {elapsed:.2f}s for {len(results)} stocks (bulk download saved ~{len(tickers)*3} redundant API calls)")
     
     return {
         "stocks": results,
