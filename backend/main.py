@@ -2068,10 +2068,24 @@ async def get_mystic_pulse(ticker: str, period: str = "1y", adx_length: int = 9,
             else:
                 trend = "neutral"
             
+            # Calculate momentum by comparing current vs previous trend magnitude
+            last_pos = last.get("positive_intensity", 0) or 0
+            last_neg = last.get("negative_intensity", 0) or 0
+            prev_pos = prev.get("positive_intensity", 0) or 0
+            prev_neg = prev.get("negative_intensity", 0) or 0
+            current_magnitude = last_pos - last_neg
+            prev_magnitude = prev_pos - prev_neg
+            if abs(current_magnitude) > abs(prev_magnitude):
+                momentum = "strengthening"
+            elif abs(current_magnitude) < abs(prev_magnitude):
+                momentum = "weakening"
+            else:
+                momentum = "steady"
+            
             summary = {
                 "trend": trend,
                 "strength": round(float(strength), 3),
-                "momentum": "steady",
+                "momentum": momentum,
                 "trend_score": trend_score,
                 "di_plus": last.get("plus_di", 0),
                 "di_minus": last.get("minus_di", 0),
