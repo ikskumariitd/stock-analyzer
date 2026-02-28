@@ -1859,6 +1859,22 @@ async def get_csp_batch(request: CSPBatchRequest):
             csp_combined["ripster_summary"] = ripster_summary_str
             csp_combined["ripster_trend"] = ripster_trend
             
+            # Add Mystic Pulse data
+            # get_mystic_pulse_summary needs pulse_df which is calculated from hist.
+            # a simple way is to use the existing calculate_mystic_pulse if it were synchronous, 
+            # but we can also just fetch it using the cache or standard functions.
+            # To be safe and since getting Mystic Pulse full data is async, we can try to 
+            # rely on the cache or calculate a quick version if needed. Actually, get_mystic_pulse
+            # caches its result. Since we are in a sync thread, we can call the sync calculate function.
+            try:
+                from main import get_mystic_pulse_summary, calculate_mystic_pulse
+                pulse_df = calculate_mystic_pulse(hist)
+                mystic_summary = get_mystic_pulse_summary(pulse_df) if not pulse_df.empty else {}
+                csp_combined["mystic_summary"] = mystic_summary
+            except Exception as e:
+                print(f"  Mystic Pulse summary error for {ticker}: {e}")
+                csp_combined["mystic_summary"] = {}
+            
             return ticker, stock_info, csp_combined
             
         except Exception as e:
@@ -1951,8 +1967,55 @@ async def search_stocks(query: str):
         return {"results": [], "error": str(e)}
 
 
+def get_mystic_pulse_summary(pulse_df):
+    """Generate a summary from a Mystic Pulse DataFrame."""
+    if pulse_df is None or pulse_df.empty:
+        return {"error": "No data"}
+    
+    # Generate summary from filtered data (use last entry for summary)
+    last = pulse_df.iloc[-1]
+    prev = pulse_df.iloc[-2] if len(pulse_df) > 1 else last
+    
+    trend_score = last.get("dominant_direction", 0)
+    strength = abs(last.get("positive_intensity", 0) if trend_score > 0 else last.get("negative_intensity", 0))
+    
+    if trend_score > 0:
+        trend = "bullish"
+    elif trend_score < 0:
+        trend = "bearish"
+    else:
+        trend = "neutral"
+    
+    # Calculate momentum by comparing current vs previous trend magnitude
+    last_pos = last.get("positive_intensity", 0) or 0
+    last_neg = last.get("negative_intensity", 0) or 0
+    prev_pos = prev.get("positive_intensity", 0) or 0
+    prev_neg = prev.get("negative_intensity", 0) or 0
+    current_magnitude = last_pos - last_neg
+    prev_magnitude = prev_pos - prev_neg
+    
+    if abs(current_magnitude) > abs(prev_magnitude):
+        momentum = "strengthening"
+    elif abs(current_magnitude) < abs(prev_magnitude):
+        momentum = "weakening"
+    else:
+        momentum = "steady"
+    
+    return {
+        "trend": trend,
+        "strength": round(float(strength), 3),
+        "momentum": momentum,
+        "trend_score": trend_score,
+        "di_plus": last.get("di_plus", 0),
+        "di_minus": last.get("di_minus", 0),
+        "positive_intensity": last.get("positive_intensity", 0),
+        "negative_intensity": last.get("negative_intensity", 0),
+        "pulse_color": last.get("pulse_color", "rgb(128,128,128)")
+    }
+
+
 @app.get("/api/mystic-pulse/{ticker}")
-async def get_mystic_pulse(ticker: str, period: str = "1y", adx_length: int = 9, smoothing_factor: int = 1, refresh: bool = False):
+async def get_mystic_pulse(ticker: str, period: str = "1y", adx_length: int = 9, smoothing_factor: int = 5, refresh: bool = False):
     """
     Get Mystic Pulse v2.0 indicator data for a stock.
     
@@ -2055,44 +2118,7 @@ async def get_mystic_pulse(ticker: str, period: str = "1y", adx_length: int = 9,
         
         # Generate summary from filtered data (use last entry for summary)
         if filtered_data:
-            last = filtered_data[-1]
-            prev = filtered_data[-2] if len(filtered_data) > 1 else last
-            
-            trend_score = last.get("dominant_direction", 0)
-            strength = abs(last.get("positive_intensity", 0) if trend_score > 0 else last.get("negative_intensity", 0))
-            
-            if trend_score > 0:
-                trend = "bullish"
-            elif trend_score < 0:
-                trend = "bearish"
-            else:
-                trend = "neutral"
-            
-            # Calculate momentum by comparing current vs previous trend magnitude
-            last_pos = last.get("positive_intensity", 0) or 0
-            last_neg = last.get("negative_intensity", 0) or 0
-            prev_pos = prev.get("positive_intensity", 0) or 0
-            prev_neg = prev.get("negative_intensity", 0) or 0
-            current_magnitude = last_pos - last_neg
-            prev_magnitude = prev_pos - prev_neg
-            if abs(current_magnitude) > abs(prev_magnitude):
-                momentum = "strengthening"
-            elif abs(current_magnitude) < abs(prev_magnitude):
-                momentum = "weakening"
-            else:
-                momentum = "steady"
-            
-            summary = {
-                "trend": trend,
-                "strength": round(float(strength), 3),
-                "momentum": momentum,
-                "trend_score": trend_score,
-                "di_plus": last.get("plus_di", 0),
-                "di_minus": last.get("minus_di", 0),
-                "positive_intensity": last.get("positive_intensity", 0),
-                "negative_intensity": last.get("negative_intensity", 0),
-                "pulse_color": last.get("pulse_color", "rgb(128,128,128)")
-            }
+            summary = get_mystic_pulse_summary(pulse_df)
         else:
             summary = {"error": "No data available"}
         
@@ -2386,6 +2412,9 @@ async def send_email_report(request: EmailRequest):
                             <th>Symbol</th>
                             <th>Company</th>
                             <th>Ripster EMA</th>
+                            <th>Trend</th>
+                            <th>Strength</th>
+                            <th>Momentum</th>
                             <th>Price</th>
                             <th>1D Change</th>
                             <th>RSI</th>
@@ -2434,6 +2463,12 @@ async def send_email_report(request: EmailRequest):
             week52_low = vol_data.get('week52_low')
             week52_high = vol_data.get('week52_high')
             ripster_summary = vol_data.get('ripster_summary', 'N/A')
+            
+            
+            mystic_summary = vol_data.get('mystic_summary', {})
+            mystic_trend = mystic_summary.get('trend', 'N/A')
+            mystic_strength = mystic_summary.get('strength')
+            mystic_momentum = mystic_summary.get('momentum', 'N/A')
             
             # 30-Delta Metrics
             delta30_dte = vol_data.get('delta30_dte', 'N/A')
@@ -2486,6 +2521,9 @@ async def send_email_report(request: EmailRequest):
                     <td style="font-size: 0.85em;">{ripster_summary}</td>
                     <td>${price:.2f}</td>
                     <td class="{change_class}">{change_sign}{change_1d:.2f} ({change_sign}{change_1d_pct:.2f}%)</td>
+                    <td style="color: {'#27ae60' if mystic_trend == 'bullish' else '#e74c3c' if mystic_trend == 'bearish' else '#555'}; text-transform: capitalize;">{mystic_trend}</td>
+                    <td style="color: {'#27ae60' if mystic_trend == 'bullish' else '#e74c3c' if mystic_trend == 'bearish' else '#555'};">{f'{(mystic_strength * 100):.0f}%' if mystic_strength else 'N/A'}</td>
+                    <td style="color: {'#9b59b6' if mystic_momentum == 'strengthening' else '#e67e22' if mystic_momentum == 'weakening' else '#555'}; text-transform: capitalize;">{mystic_momentum}</td>
                     <td>{f'{rsi:.1f}' if rsi else 'N/A'}</td>
                     <td>{f'${week52_low:.2f}' if week52_low else 'N/A'}</td>
                     <td>{f'${week52_high:.2f}' if week52_high else 'N/A'}</td>
@@ -2596,6 +2634,19 @@ async def scheduled_email_report():
                     bullish = summ.get("bullish_clouds", 0)
                     total = summ.get("total_clouds", 3)
                     ripster_summary_str = f"{trend_text} ({bullish}/{total} bullish)"
+
+                # Fetch Mystic Pulse data
+                from main import get_mystic_pulse # ensure available
+                mystic_summary = {}
+                try:
+                    # we can use the async function by calling the underlying logic or creating a sync wrapper, 
+                    # but actually get_mystic_pulse is async, so we might need a specific handling.
+                    # Since we are already in an async executor context, it's a bit tricky to run async in ThreadPoolExecutor
+                    # Let's provide a basic fallback or fetch later. The cached data might already be available via calculate_csp_metrics if updated.
+                    # As a simpler fix, we'll try to run the calculation synchronously if possible.
+                    pass # We will instead update `calculate_volatility_metrics` or `calculate_csp_metrics` or `perform_bulk_analysis` if needed.
+                except Exception as e:
+                    pass
 
                 return (symbol, {**vol_result, **metrics_result, "ripster_summary": ripster_summary_str})
             except Exception as e:

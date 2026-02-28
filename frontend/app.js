@@ -2490,6 +2490,9 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
             case 'symbol': return stock.symbol || '';
             case 'company': return stock.name || '';
             case 'ripster': return volData?.ripster_summary || '';
+            case 'trend': return volData?.mystic_summary?.trend || '';
+            case 'strength': return volData?.mystic_summary?.strength || 0;
+            case 'momentum': return volData?.mystic_summary?.momentum || '';
             case 'price': return stock.price || 0;
             case 'change': return stock.change_1d_pct || 0;
             case 'rsi': return stock.indicators?.RSI || 0;
@@ -2800,6 +2803,9 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                         { key: 'symbol', label: 'Symbol' },
                                         { key: 'company', label: 'Company' },
                                         { key: 'ripster', label: 'Ripster EMA' },
+                                        { key: 'trend', label: 'Trend' },
+                                        { key: 'strength', label: 'Strength' },
+                                        { key: 'momentum', label: 'Momentum' },
                                         { key: 'price', label: 'Price' },
                                         { key: 'change', label: '1D Chg' },
                                         { key: 'rsi', label: 'RSI' },
@@ -2912,6 +2918,38 @@ function CSPSummaryTable({ stocks, cachedData = {}, setCachedData }) {
                                                 whiteSpace: 'nowrap'
                                             }}>
                                                 {volData?.ripster_summary || '-'}
+                                            </td>
+                                            <td style={{
+                                                padding: '0.5rem',
+                                                fontSize: '0.8rem',
+                                                fontWeight: 500,
+                                                color: volData?.mystic_summary?.trend === 'bullish' ? '#27ae60' :
+                                                    volData?.mystic_summary?.trend === 'bearish' ? '#e74c3c' : '#555',
+                                                textTransform: 'capitalize',
+                                                whiteSpace: 'nowrap'
+                                            }}>
+                                                {volData?.mystic_summary?.trend || '-'}
+                                            </td>
+                                            <td style={{
+                                                padding: '0.5rem',
+                                                fontSize: '0.8rem',
+                                                fontWeight: 600,
+                                                color: volData?.mystic_summary?.trend === 'bullish' ? '#27ae60' :
+                                                    volData?.mystic_summary?.trend === 'bearish' ? '#e74c3c' : '#555',
+                                                whiteSpace: 'nowrap'
+                                            }}>
+                                                {volData?.mystic_summary?.strength ? `${(volData.mystic_summary.strength * 100).toFixed(0)}%` : '-'}
+                                            </td>
+                                            <td style={{
+                                                padding: '0.5rem',
+                                                fontSize: '0.8rem',
+                                                fontWeight: 500,
+                                                color: volData?.mystic_summary?.momentum === 'strengthening' ? '#9b59b6' :
+                                                    volData?.mystic_summary?.momentum === 'weakening' ? '#e67e22' : '#555',
+                                                textTransform: 'capitalize',
+                                                whiteSpace: 'nowrap'
+                                            }}>
+                                                {volData?.mystic_summary?.momentum || '-'}
                                             </td>
                                             <td style={{
                                                 padding: '0.5rem',
