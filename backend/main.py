@@ -1976,7 +1976,13 @@ def get_mystic_pulse_summary(pulse_df):
     last = pulse_df.iloc[-1]
     prev = pulse_df.iloc[-2] if len(pulse_df) > 1 else last
     
-    trend_score = last.get("dominant_direction", 0)
+    # Sanitize inputs (numpy ints can't be JSON serialized easily in FastAPI directly inside lists/dicts sometimes)
+    def to_py_int(val):
+        if hasattr(val, 'item'):
+            return val.item()
+        return int(val) if val is not None else 0
+        
+    trend_score = to_py_int(last.get("dominant_direction", 0))
     strength = abs(last.get("positive_intensity", 0) if trend_score > 0 else last.get("negative_intensity", 0))
     
     if trend_score > 0:
@@ -2005,12 +2011,12 @@ def get_mystic_pulse_summary(pulse_df):
         "trend": trend,
         "strength": round(float(strength), 3),
         "momentum": momentum,
-        "trend_score": trend_score,
-        "di_plus": last.get("di_plus", 0),
-        "di_minus": last.get("di_minus", 0),
-        "positive_intensity": last.get("positive_intensity", 0),
-        "negative_intensity": last.get("negative_intensity", 0),
-        "pulse_color": last.get("pulse_color", "rgb(128,128,128)")
+        "trend_score": to_py_int(trend_score),
+        "di_plus": float(last.get("di_plus", 0)),
+        "di_minus": float(last.get("di_minus", 0)),
+        "positive_intensity": float(last.get("positive_intensity", 0)),
+        "negative_intensity": float(last.get("negative_intensity", 0)),
+        "pulse_color": str(last.get("pulse_color", "rgb(128,128,128)"))
     }
 
 
