@@ -2012,8 +2012,8 @@ def get_mystic_pulse_summary(pulse_df):
         "strength": round(float(strength), 3),
         "momentum": momentum,
         "trend_score": to_py_int(trend_score),
-        "di_plus": float(last.get("di_plus", 0)),
-        "di_minus": float(last.get("di_minus", 0)),
+        "di_plus": float(last.get("plus_di", 0) if "plus_di" in last else last.get("di_plus", 0)),
+        "di_minus": float(last.get("minus_di", 0) if "minus_di" in last else last.get("di_minus", 0)),
         "positive_intensity": float(last.get("positive_intensity", 0)),
         "negative_intensity": float(last.get("negative_intensity", 0)),
         "pulse_color": str(last.get("pulse_color", "rgb(128,128,128)"))
@@ -2124,7 +2124,54 @@ async def get_mystic_pulse(ticker: str, period: str = "1y", adx_length: int = 9,
         
         # Generate summary from filtered data (use last entry for summary)
         if filtered_data:
-            summary = get_mystic_pulse_summary(pulse_df)
+            # Reconstruct a small dataframe from the generated full_data list to pass to get_mystic_pulse_summary
+            # Or pass the full list and construct summary from it.
+            # But wait, pulse_df might be undefined if we loaded from cache!
+            # So we should just use the full_data list which has all the computed columns.
+            last = filtered_data[-1]
+            prev = filtered_data[-2] if len(filtered_data) > 1 else last
+            
+            trend_score = last.get("dominant_direction", 0)
+            strength = abs(last.get("positive_intensity", 0) if trend_score > 0 else last.get("negative_intensity", 0))
+            
+            if trend_score > 0:
+                trend = "bullish"
+            elif trend_score < 0:
+                trend = "bearish"
+            else:
+                trend = "neutral"
+            
+            # Calculate momentum by comparing current vs previous trend magnitude
+            last_pos = last.get("positive_intensity", 0) or 0
+            last_neg = last.get("negative_intensity", 0) or 0
+            prev_pos = prev.get("positive_intensity", 0) or 0
+            prev_neg = prev.get("negative_intensity", 0) or 0
+            current_magnitude = last_pos - last_neg
+            prev_magnitude = prev_pos - prev_neg
+            if abs(current_magnitude) > abs(prev_magnitude):
+                momentum = "strengthening"
+            elif abs(current_magnitude) < abs(prev_magnitude):
+                momentum = "weakening"
+            else:
+                momentum = "steady"
+            
+            # Sanitize inputs (numpy ints can't be JSON serialized easily in FastAPI directly inside lists/dicts sometimes)
+            def to_py_int(val):
+                if hasattr(val, 'item'):
+                    return val.item()
+                return int(val) if val is not None else 0
+                
+            summary = {
+                "trend": trend,
+                "strength": round(float(strength), 3),
+                "momentum": momentum,
+                "trend_score": to_py_int(trend_score),
+                "di_plus": float(last.get("plus_di", 0)),
+                "di_minus": float(last.get("minus_di", 0)),
+                "positive_intensity": float(last.get("positive_intensity", 0)),
+                "negative_intensity": float(last.get("negative_intensity", 0)),
+                "pulse_color": str(last.get("pulse_color", "rgb(128,128,128)"))
+            }
         else:
             summary = {"error": "No data available"}
         
